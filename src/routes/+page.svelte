@@ -42,8 +42,14 @@
 	type GapSection = 'all' | 'foundations' | 'mainlines' | 'deep';
 	let selectedGapSection = $state<GapSection>('all');
 
-	function getGapSection(fen: string): Exclude<GapSection, 'all'> {
-		const move = parseInt(fen.split(' ')[5], 10) || 1;
+	function getGapSection(depth: number): Exclude<GapSection, 'all'> {
+		// gap.depth is the ply count (half-moves) from the true game start,
+		// via a BFS that always roots at STARTING_FEN (see gaps.ts) — reliable
+		// regardless of the repertoire's effective start scope. Converting to
+		// a standard fullmove number: gap.toFen itself can't be used here, its
+		// FEN comes from lichess_moves, which the import script normalizes to
+		// 4 fields with no move-counter (see scripts/lichess-import.py).
+		const move = Math.floor(depth / 2) + 1;
 		if (move <= 5) return 'foundations';
 		if (move <= 15) return 'mainlines';
 		return 'deep';
@@ -52,7 +58,7 @@
 	const displayedGaps = $derived(
 		selectedGapSection === 'all'
 			? data.gaps
-			: data.gaps.filter((g) => getGapSection(g.toFen) === selectedGapSection)
+			: data.gaps.filter((g) => getGapSection(g.depth) === selectedGapSection)
 	);
 
 
@@ -470,7 +476,7 @@
 							onclick={() => (selectedGapSection = 'foundations')}
 						>
 							Foundations (1–5) <span class="tab-count"
-								>{data.gaps.filter((g) => getGapSection(g.toFen) === 'foundations').length}</span
+								>{data.gaps.filter((g) => getGapSection(g.depth) === 'foundations').length}</span
 							>
 						</button>
 						<button
@@ -479,7 +485,7 @@
 							onclick={() => (selectedGapSection = 'mainlines')}
 						>
 							Mainlines (6–15) <span class="tab-count"
-								>{data.gaps.filter((g) => getGapSection(g.toFen) === 'mainlines').length}</span
+								>{data.gaps.filter((g) => getGapSection(g.depth) === 'mainlines').length}</span
 							>
 						</button>
 						<button
@@ -488,7 +494,7 @@
 							onclick={() => (selectedGapSection = 'deep')}
 						>
 							Deep Lines (16+) <span class="tab-count"
-								>{data.gaps.filter((g) => getGapSection(g.toFen) === 'deep').length}</span
+								>{data.gaps.filter((g) => getGapSection(g.depth) === 'deep').length}</span
 							>
 						</button>
 					</div>
