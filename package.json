@@ -15,9 +15,6 @@
 		"format": "prettier --write .",
 		"lint:security": "eslint ."
 	},
-	"overrides": {
-    "cookie": "^0.7.2"
-    },
 	"devDependencies": {
 		"@eslint/compat": "^2.0.5",
 		"@eslint/js": "^10.0.1",
@@ -49,5 +46,8 @@
 		"drizzle-orm": "^0.45.1",
 		"postgres": "^3.4.9",
 		"ts-fsrs": "^5.2.3"
+	},
+	"overrides": {
+		"cookie": "^0.7.2"
 	}
 }
