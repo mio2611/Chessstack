@@ -100,6 +100,21 @@ export const DELETE: RequestHandler = async ({ locals, params }) => {
 
 	if (!existing) throw error(404, 'Repertoire not found');
 
+	// Refuse to delete a primary repertoire that still has secondaries attached.
+	// The DB-level ON DELETE RESTRICT would catch this too, but as a raw FK
+	// violation rather than a clean error — check explicitly instead.
+	const children = await db
+		.select({ id: repertoire.id })
+		.from(repertoire)
+		.where(eq(repertoire.parentRepertoireId, id));
+
+	if (children.length > 0) {
+		throw error(
+			409,
+			'Cannot delete a repertoire that has secondary repertoires attached. Delete or reparent them first.'
+		);
+	}
+
 	await db.transaction(async (tx) => {
 		// Delete child rows first (foreign key references the repertoire row).
 		await tx.delete(userMove).where(eq(userMove.repertoireId, id));

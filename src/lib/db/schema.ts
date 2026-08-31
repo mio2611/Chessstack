@@ -18,7 +18,8 @@ import {
 	serial,
 	text,
 	timestamp,
-	unique
+	unique,
+	AnyPgColumn
 } from 'drizzle-orm/pg-core';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -282,8 +283,17 @@ export const repertoire = pgTable('repertoire', {
 	name: text('name').notNull(), // e.g. "White - e4 lines"
 	color: text('color').notNull(), // "WHITE" or "BLACK" — which side the user plays
 	startFen: text('start_fen'), // custom start position FEN — null means "after user's first move" (default)
+	// null = primary repertoire. Non-null = secondary, branches off the parent's
+	// tree at startFen. Must reference a repertoire of the same color and userId,
+	// and the parent must itself be primary (single level of nesting, enforced in
+	// the API layer, not the DB — Postgres CHECK constraints can't reference other rows).
+	parentRepertoireId: integer('parent_repertoire_id').references((): AnyPgColumn => repertoire.id, {
+		onDelete: 'restrict'
+	}),
 	createdAt: timestamp('created_at').notNull()
-});
+}, (table) => ({
+	parentRepertoireIdIdx: index('idx_repertoire_parent_id').on(table.parentRepertoireId)
+}));
 
 // Every move the user has added to a repertoire.
 // This is the raw move record — what move was played and how it was sourced.
