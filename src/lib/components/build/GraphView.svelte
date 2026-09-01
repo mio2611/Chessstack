@@ -65,7 +65,11 @@
 			g.setNode(n.fenKey, { width: NODE_WIDTH, height: NODE_HEIGHT });
 		}
 		for (const e of graph.edges) {
-			g.setEdge(e.fromKey, e.toKey, {}, e.id);
+			// No 4th "name" argument: dagre only allows named/multi-edges in
+			// multigraph mode, which we don't need — (fromKey, toKey) pairs
+			// are already unique here, since two different moves from the
+			// same position can never lead to the same resulting position.
+			g.setEdge(e.fromKey, e.toKey);
 		}
 
 		dagre.layout(g);
@@ -76,7 +80,7 @@
 		});
 
 		const edges: LaidOutEdge[] = graph.edges.map((e) => {
-			const edgeLayout = g.edge({ v: e.fromKey, w: e.toKey, name: e.id });
+			const edgeLayout = g.edge(e.fromKey, e.toKey);
 			return { ...e, points: edgeLayout?.points ?? [] };
 		});
 
