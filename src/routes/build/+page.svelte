@@ -37,6 +37,8 @@
 	import OpeningName from '$lib/components/OpeningName.svelte';
 	import MoveList from '$lib/components/build/MoveList.svelte';
 	import MoveTree from '$lib/components/build/MoveTree.svelte';
+	// TEMPORARY, for lot 2 visual testing only — removed/properly integrated in lot 3.
+	import GraphView from '$lib/components/build/GraphView.svelte';
 	import AnnotationModal from '$lib/components/build/AnnotationModal.svelte';
 	import ImportPgnModal from '$lib/components/build/ImportPgnModal.svelte';
 	import { createBuildState, STARTING_FEN, fenKey } from '$lib/components/build/buildState.svelte';
@@ -514,6 +516,16 @@
 			startFen={s.startFen}
 			onNavigateToLine={s.navigateToLine}
 		/>
+
+		<!-- TEMPORARY, for lot 2 visual testing only — removed/properly integrated in lot 3. -->
+		<div style="height: 400px;">
+			<GraphView
+				moves={s.moves}
+				currentFen={s.currentFen}
+				startFen={s.startFen}
+				onNavigateToLine={s.navigateToLine}
+			/>
+		</div>
 
 		<!-- Moves from the current position -->
 		{#if s.exploreMode}
