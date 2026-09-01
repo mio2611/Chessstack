@@ -19,6 +19,7 @@
 
 	import dagre from '@dagrejs/dagre';
 	import { buildMoveGraph, type GraphNode, type GraphEdge } from './moveGraphBuilder';
+	import { untrack } from 'svelte';
 	import type { RepertoireMove } from './buildState.svelte';
 	import { fenKey } from '$lib/fen';
 
@@ -118,6 +119,26 @@
 	let panStartX = 0;
 	let panStartY = 0;
 	let didDrag = false;
+
+	// Re-centers on the current node whenever it changes, or whenever the
+	// graph itself changes (a move was added/removed). Reads scale/viewport
+	// through untrack so that zooming or panning — which change scale/panX/
+	// panY but not currentFenKey — never re-trigger this and fight the
+	// user's own zoom/pan.
+	$effect(() => {
+		const key = currentFenKey;
+		const nodeList = layout.nodes;
+		const node = nodeList.find((n) => n.fenKey === key);
+		if (!node) return;
+
+		untrack(() => {
+			if (!viewport) return;
+			const rect = viewport.getBoundingClientRect();
+			if (rect.width === 0 || rect.height === 0) return;
+			panX = rect.width / 2 - node.x * scale;
+			panY = rect.height / 2 - node.y * scale;
+		});
+	});
 
 	function onPointerDown(e: PointerEvent) {
 		isDragging = true;
