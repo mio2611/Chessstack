@@ -36,8 +36,6 @@
 	import EvalBar from '$lib/components/EvalBar.svelte';
 	import OpeningName from '$lib/components/OpeningName.svelte';
 	import MoveList from '$lib/components/build/MoveList.svelte';
-	import MoveTree from '$lib/components/build/MoveTree.svelte';
-	// TEMPORARY, for lot 2 visual testing only — removed/properly integrated in lot 3.
 	import GraphView from '$lib/components/build/GraphView.svelte';
 	import AnnotationModal from '$lib/components/build/AnnotationModal.svelte';
 	import ImportPgnModal from '$lib/components/build/ImportPgnModal.svelte';
@@ -342,30 +340,14 @@
 />
 
 <div class="page">
-	<!-- ── Board column ─────────────────────────────────────────────────────── -->
-	<!--
-		{#key boardKey} remounts the board when boardKey increments.
-		We increment boardKey to reject a move visually — it forces
-		Chessground to reinitialize with `currentFen`, snapping the
-		piece back to where it was.
-	-->
-	<div class="board-col">
-		<ResizableBoard boardSize={data.settings?.boardSize ?? 0} onResize={handleBoardResize}>
-			<div class="board-inner">
-				<EvalBar {evalCp} {evalMate} {orientation} />
-				{#key s.boardKey}
-					<ChessBoard
-						fen={s.currentFen}
-						{orientation}
-						boardTheme={data.settings?.boardTheme ?? 'blue'}
-						interactive={!s.saving}
-						lastMove={s.lastMove}
-						onMove={s.handleMove}
-						autoShapes={boardShapes}
-					/>
-				{/key}
-			</div>
-		</ResizableBoard>
+	<!-- ── Graph column ─────────────────────────────────────────────────────── -->
+	<div class="graph-col">
+		<GraphView
+			moves={s.moves}
+			currentFen={s.currentFen}
+			startFen={s.startFen}
+			onNavigateToLine={s.navigateToLine}
+		/>
 	</div>
 
 	<!-- ── Sidebar ──────────────────────────────────────────────────────────── -->
@@ -429,6 +411,29 @@
 				</div>
 			{/if}
 		</div>
+
+		<!--
+			{#key boardKey} remounts the board when boardKey increments.
+			We increment boardKey to reject a move visually — it forces
+			Chessground to reinitialize with `currentFen`, snapping the
+			piece back to where it was.
+		-->
+		<ResizableBoard boardSize={data.settings?.boardSize ?? 0} onResize={handleBoardResize}>
+			<div class="board-inner">
+				<EvalBar {evalCp} {evalMate} {orientation} />
+				{#key s.boardKey}
+					<ChessBoard
+						fen={s.currentFen}
+						{orientation}
+						boardTheme={data.settings?.boardTheme ?? 'blue'}
+						interactive={!s.saving}
+						lastMove={s.lastMove}
+						onMove={s.handleMove}
+						autoShapes={boardShapes}
+					/>
+				{/key}
+			</div>
+		</ResizableBoard>
 
 		<!-- Mode toggle -->
 		<div class="mode-toggle">
@@ -508,24 +513,6 @@
 			onNavigate={s.navigateToHistoryIdx}
 			isExploreEntry={s.exploreMode ? s.isExploreNavEntry : undefined}
 		/>
-
-		<!-- Full repertoire tree view -->
-		<MoveTree
-			moves={s.moves}
-			currentFen={s.currentFen}
-			startFen={s.startFen}
-			onNavigateToLine={s.navigateToLine}
-		/>
-
-		<!-- TEMPORARY, for lot 2 visual testing only — removed/properly integrated in lot 3. -->
-		<div style="height: 400px;">
-			<GraphView
-				moves={s.moves}
-				currentFen={s.currentFen}
-				startFen={s.startFen}
-				onNavigateToLine={s.navigateToLine}
-			/>
-		</div>
 
 		<!-- Moves from the current position -->
 		{#if s.exploreMode}
@@ -836,8 +823,10 @@
 		padding: var(--space-3);
 	}
 
-	.board-col {
+	.graph-col {
 		width: 100%;
+		height: 50vh;
+		min-height: 320px;
 	}
 
 	.board-inner {
@@ -869,6 +858,10 @@
 			justify-content: center;
 			padding: 0;
 		}
+
+		.graph-col {
+			height: 75vh;
+		}
 	}
 
 	/* Desktop (≥1024px) — --bp-lg */
@@ -876,7 +869,7 @@
 		.page {
 			grid-template-columns: auto 340px;
 			gap: var(--space-6);
-			max-width: 1100px;
+			max-width: 1600px;
 			margin: 0 auto;
 		}
 	}
