@@ -871,8 +871,19 @@
 		.page {
 			grid-template-columns: minmax(0, 1fr) 340px;
 			gap: var(--space-6);
+			/*
+			 * .app-main (the shared root layout, used by every route) caps
+			 * content at max-width: 1400px, which was silently overriding
+			 * this rule — the graph needs more room than that cap allows.
+			 * Rather than widen the shared layout for every page, break
+			 * .page out of it: width relative to the viewport, pulled back
+			 * to center via negative margins, capped at 2200px so it stays
+			 * bounded on very wide/ultrawide screens.
+			 */
+			width: 100vw;
 			max-width: 2200px;
-			margin: 0 auto;
+			margin-left: calc(50% - 50vw);
+			margin-right: calc(50% - 50vw);
 		}
 	}
 
