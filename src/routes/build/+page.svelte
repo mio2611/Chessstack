@@ -871,7 +871,7 @@
 		.page {
 			grid-template-columns: minmax(0, 1fr) 340px;
 			gap: var(--space-6);
-			max-width: 1600px;
+			max-width: 2200px;
 			margin: 0 auto;
 		}
 	}
