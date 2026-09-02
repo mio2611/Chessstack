@@ -36,7 +36,7 @@
 	import EvalBar from '$lib/components/EvalBar.svelte';
 	import OpeningName from '$lib/components/OpeningName.svelte';
 	import MoveList from '$lib/components/build/MoveList.svelte';
-	import MoveTree from '$lib/components/build/MoveTree.svelte';
+	import GraphView from '$lib/components/build/GraphView.svelte';
 	import AnnotationModal from '$lib/components/build/AnnotationModal.svelte';
 	import ImportPgnModal from '$lib/components/build/ImportPgnModal.svelte';
 	import { createBuildState, STARTING_FEN, fenKey } from '$lib/components/build/buildState.svelte';
@@ -68,6 +68,11 @@
 
 	// ── Eval bar state ────────────────────────────────────────────────────────
 	let evalCp = $state<number | null>(null);
+	// Hover preview: the graph lets you preview a position on the board
+	// without changing your actual working position (s.currentFen), so you
+	// can check neighboring/before/after positions without losing track of
+	// what you're editing. null = not previewing, show the real position.
+	let previewFen = $state<string | null>(null);
 	let evalMate = $state<number | null>(null);
 
 	// ── Board resize ─────────────────────────────────────────────────────────
@@ -340,30 +345,17 @@
 />
 
 <div class="page">
-	<!-- ── Board column ─────────────────────────────────────────────────────── -->
-	<!--
-		{#key boardKey} remounts the board when boardKey increments.
-		We increment boardKey to reject a move visually — it forces
-		Chessground to reinitialize with `currentFen`, snapping the
-		piece back to where it was.
-	-->
-	<div class="board-col">
-		<ResizableBoard boardSize={data.settings?.boardSize ?? 0} onResize={handleBoardResize}>
-			<div class="board-inner">
-				<EvalBar {evalCp} {evalMate} {orientation} />
-				{#key s.boardKey}
-					<ChessBoard
-						fen={s.currentFen}
-						{orientation}
-						boardTheme={data.settings?.boardTheme ?? 'blue'}
-						interactive={!s.saving}
-						lastMove={s.lastMove}
-						onMove={s.handleMove}
-						autoShapes={boardShapes}
-					/>
-				{/key}
-			</div>
-		</ResizableBoard>
+	<!-- ── Graph column ─────────────────────────────────────────────────────── -->
+	<div class="graph-col">
+		<GraphView
+			moves={s.moves}
+			currentFen={s.currentFen}
+			startFen={s.startFen}
+			repertoireColor={data.repertoire.color as 'WHITE' | 'BLACK'}
+			cardStates={data.cardStates}
+			onNavigateToLine={s.navigateToLine}
+			onPreviewFen={(fen) => (previewFen = fen)}
+		/>
 	</div>
 
 	<!-- ── Sidebar ──────────────────────────────────────────────────────────── -->
@@ -427,6 +419,29 @@
 				</div>
 			{/if}
 		</div>
+
+		<!--
+			{#key boardKey} remounts the board when boardKey increments.
+			We increment boardKey to reject a move visually — it forces
+			Chessground to reinitialize with `currentFen`, snapping the
+			piece back to where it was.
+		-->
+		<ResizableBoard boardSize={data.settings?.boardSize ?? 0} onResize={handleBoardResize}>
+			<div class="board-inner">
+				<EvalBar {evalCp} {evalMate} {orientation} />
+				{#key s.boardKey}
+					<ChessBoard
+						fen={previewFen ?? s.currentFen}
+						{orientation}
+						boardTheme={data.settings?.boardTheme ?? 'blue'}
+						interactive={!s.saving && !previewFen}
+						lastMove={previewFen ? undefined : s.lastMove}
+						onMove={s.handleMove}
+						autoShapes={previewFen ? [] : boardShapes}
+					/>
+				{/key}
+			</div>
+		</ResizableBoard>
 
 		<!-- Mode toggle -->
 		<div class="mode-toggle">
@@ -505,14 +520,6 @@
 			currentIdx={s.navHistory.length - 1}
 			onNavigate={s.navigateToHistoryIdx}
 			isExploreEntry={s.exploreMode ? s.isExploreNavEntry : undefined}
-		/>
-
-		<!-- Full repertoire tree view -->
-		<MoveTree
-			moves={s.moves}
-			currentFen={s.currentFen}
-			startFen={s.startFen}
-			onNavigateToLine={s.navigateToLine}
 		/>
 
 		<!-- Moves from the current position -->
@@ -824,8 +831,11 @@
 		padding: var(--space-3);
 	}
 
-	.board-col {
+	.graph-col {
 		width: 100%;
+		height: 50vh;
+		min-height: 320px;
+		min-width: 0;
 	}
 
 	.board-inner {
@@ -851,21 +861,38 @@
 	@media (min-width: 768px) {
 		.page {
 			display: grid;
-			grid-template-columns: auto 280px;
+			grid-template-columns: minmax(0, 1fr) 280px;
 			gap: var(--space-4);
 			align-items: start;
 			justify-content: center;
 			padding: 0;
+		}
+
+		.graph-col {
+			height: 75vh;
 		}
 	}
 
 	/* Desktop (≥1024px) — --bp-lg */
 	@media (min-width: 1024px) {
 		.page {
-			grid-template-columns: auto 340px;
+			grid-template-columns: minmax(0, 1fr) 340px;
 			gap: var(--space-6);
-			max-width: 1100px;
-			margin: 0 auto;
+			/*
+			 * .app-main (the shared root layout, used by every route) caps
+			 * content at max-width: 1400px, which was silently overriding
+			 * this rule — the graph needs more room than that cap allows.
+			 * Rather than widen the shared layout for every page, break
+			 * .page out of it: width relative to the viewport, pulled back
+			 * to center via negative margins, capped at 2200px so it stays
+			 * bounded on very wide/ultrawide screens.
+			 */
+			width: 100vw;
+			max-width: 2200px;
+			box-sizing: border-box;
+			padding: 0 var(--space-6);
+			margin-left: calc(50% - 50vw);
+			margin-right: calc(50% - 50vw);
 		}
 	}
 
