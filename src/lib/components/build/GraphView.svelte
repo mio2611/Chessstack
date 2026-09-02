@@ -27,10 +27,11 @@
 		moves: RepertoireMove[];
 		currentFen: string;
 		startFen: string | null;
+		repertoireColor: 'WHITE' | 'BLACK';
 		onNavigateToLine: (sans: string[]) => void;
 	}
 
-	let { moves, currentFen, startFen, onNavigateToLine }: Props = $props();
+	let { moves, currentFen, startFen, repertoireColor, onNavigateToLine }: Props = $props();
 
 	const NODE_WIDTH = 64;
 	const NODE_HEIGHT = 36;
@@ -100,6 +101,20 @@
 		return node.pathSans.length === 0 ? 'Start' : node.pathSans[node.pathSans.length - 1];
 	}
 
+	// A FEN's active-color field tells us who moves NEXT, so the color that
+	// just played (the mover for this node) is the opposite of that field.
+	// Comparing the mover against repertoireColor tells us whether this node
+	// represents one of the user's own moves or an opponent reply — derived
+	// per-node from its own FEN rather than from ply parity, so it stays
+	// correct even with a custom startFen where the root isn't move 1.
+	function isOwnMove(node: LaidOutNode): boolean {
+		if (node.pathSans.length === 0) return false; // root — neither
+		const activeColor = node.fen.split(' ')[1]; // 'w' or 'b', who moves next
+		const moverColor = activeColor === 'w' ? 'b' : 'w';
+		const ownColor = repertoireColor === 'WHITE' ? 'w' : 'b';
+		return moverColor === ownColor;
+	}
+
 	function handleNodeClick(node: LaidOutNode) {
 		onNavigateToLine(node.pathSans);
 	}
@@ -140,6 +155,8 @@
 		});
 	});
 
+	let activePointerId: number | null = null;
+
 	function onPointerDown(e: PointerEvent) {
 		isDragging = true;
 		didDrag = false;
@@ -147,20 +164,31 @@
 		dragStartY = e.clientY;
 		panStartX = panX;
 		panStartY = panY;
-		(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+		activePointerId = e.pointerId;
+		// No setPointerCapture here — capturing eagerly on every pointerdown
+		// intercepts the button's own click, since a captured pointer's click
+		// event resolves to the capturing element instead of the element
+		// under the cursor. Capture is only taken once a real drag starts,
+		// in onPointerMove below.
 	}
 
 	function onPointerMove(e: PointerEvent) {
 		if (!isDragging) return;
 		const dx = e.clientX - dragStartX;
 		const dy = e.clientY - dragStartY;
-		if (Math.abs(dx) > 3 || Math.abs(dy) > 3) didDrag = true;
+		if (!didDrag && (Math.abs(dx) > 3 || Math.abs(dy) > 3)) {
+			didDrag = true;
+			if (viewport && activePointerId !== null) {
+				viewport.setPointerCapture(activePointerId);
+			}
+		}
 		panX = panStartX + dx;
 		panY = panStartY + dy;
 	}
 
 	function onPointerUp() {
 		isDragging = false;
+		activePointerId = null;
 	}
 
 	function onWheel(e: WheelEvent) {
@@ -229,6 +257,8 @@
 						class="graph-node"
 						class:is-current={node.fenKey === currentFenKey}
 						class:is-root={node.pathSans.length === 0}
+						class:is-own={isOwnMove(node)}
+						class:is-opponent={node.pathSans.length > 0 && !isOwnMove(node)}
 						style="left: {node.x - NODE_WIDTH / 2}px; top: {node.y - NODE_HEIGHT / 2}px; width: {NODE_WIDTH}px; height: {NODE_HEIGHT}px;"
 						onclick={() => handleNodeClickGuarded(node)}
 					>
@@ -320,8 +350,6 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		background: var(--color-accent);
-		color: #fff;
 		border: none;
 		border-radius: 6px;
 		font-size: 12px;
@@ -331,6 +359,18 @@
 		transition:
 			transform var(--dur-fast) var(--ease-snap),
 			box-shadow var(--dur-fast) var(--ease-snap);
+	}
+
+	.graph-node.is-own {
+		background: var(--color-accent);
+		color: #fff;
+	}
+
+	.graph-node.is-opponent {
+		background: var(--color-surface-alt);
+		color: var(--color-text-muted);
+		border: 1px solid var(--color-border);
+		font-weight: 500;
 	}
 
 	.graph-node:hover {

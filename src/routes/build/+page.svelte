@@ -346,6 +346,7 @@
 			moves={s.moves}
 			currentFen={s.currentFen}
 			startFen={s.startFen}
+			repertoireColor={data.repertoire.color as 'WHITE' | 'BLACK'}
 			onNavigateToLine={s.navigateToLine}
 		/>
 	</div>
@@ -827,6 +828,7 @@
 		width: 100%;
 		height: 50vh;
 		min-height: 320px;
+		min-width: 0;
 	}
 
 	.board-inner {
@@ -852,7 +854,7 @@
 	@media (min-width: 768px) {
 		.page {
 			display: grid;
-			grid-template-columns: auto 280px;
+			grid-template-columns: minmax(0, 1fr) 280px;
 			gap: var(--space-4);
 			align-items: start;
 			justify-content: center;
@@ -867,7 +869,7 @@
 	/* Desktop (≥1024px) — --bp-lg */
 	@media (min-width: 1024px) {
 		.page {
-			grid-template-columns: auto 340px;
+			grid-template-columns: minmax(0, 1fr) 340px;
 			gap: var(--space-6);
 			max-width: 1600px;
 			margin: 0 auto;
