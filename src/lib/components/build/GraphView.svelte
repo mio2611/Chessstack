@@ -368,7 +368,7 @@
 
 	.graph-node.is-opponent {
 		background: var(--color-surface-alt);
-		color: var(--color-text-muted);
+		color: var(--color-text-secondary);
 		border: 1px solid var(--color-border);
 		font-weight: 500;
 	}
