@@ -2,7 +2,9 @@
 //
 // Grabs the active repertoire from the layout's shared data (via parent()),
 // then loads all existing moves for that repertoire so the board can show
-// what is already in the user's tree on first render.
+// what is already in the user's tree on first render. Also loads each
+// drillable move's FSRS card state (maturity, lapses), used by the graph
+// view to flag mature lines and recurring-error spots.
 //
 // If no repertoire is active (user hasn't created one yet), redirects to
 // the dashboard where the onboarding screen and "Create Repertoire" prompt live.
@@ -10,7 +12,7 @@
 import type { PageServerLoad } from './$types';
 import { redirect } from '@sveltejs/kit';
 import { db } from '$lib/db';
-import { userMove } from '$lib/db/schema';
+import { userMove, userRepertoireMove } from '$lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 
 export const load: PageServerLoad = async ({ locals, parent, url }) => {
@@ -42,6 +44,26 @@ export const load: PageServerLoad = async ({ locals, parent, url }) => {
 			and(eq(userMove.userId, locals.user!.id), eq(userMove.repertoireId, activeRepertoireId))
 		);
 
+	// Load FSRS card state (maturity, lapses) for every drillable move in this
+	// repertoire, so the graph can flag mature lines and recurring-error
+	// spots. Only fields actually needed by the graph are selected — no
+	// stability/difficulty/due, those stay internal to the drill scheduler.
+	const cardStates = await db
+		.select({
+			fromFen: userRepertoireMove.fromFen,
+			san: userRepertoireMove.san,
+			state: userRepertoireMove.state,
+			scheduledDays: userRepertoireMove.scheduledDays,
+			lapses: userRepertoireMove.lapses
+		})
+		.from(userRepertoireMove)
+		.where(
+			and(
+				eq(userRepertoireMove.userId, locals.user!.id),
+				eq(userRepertoireMove.repertoireId, activeRepertoireId)
+			)
+		);
+
 	// Optional: a comma-separated SAN list passed from the Explorer "Build from here"
 	// link. The client-side page replays these moves on first mount to jump straight
 	// to that position instead of starting at the opening.
@@ -50,6 +72,7 @@ export const load: PageServerLoad = async ({ locals, parent, url }) => {
 	return {
 		repertoire: activeRep,
 		moves,
+		cardStates,
 		jumpLine
 	};
 };

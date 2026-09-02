@@ -23,17 +23,33 @@
 	import type { RepertoireMove } from './buildState.svelte';
 	import { fenKey } from '$lib/fen';
 
+	interface CardState {
+		fromFen: string;
+		san: string;
+		state: number | null;
+		scheduledDays: number | null;
+		lapses: number | null;
+	}
+
 	interface Props {
 		moves: RepertoireMove[];
 		currentFen: string;
 		startFen: string | null;
 		repertoireColor: 'WHITE' | 'BLACK';
+		cardStates: CardState[];
 		onNavigateToLine: (sans: string[]) => void;
 		onPreviewFen: (fen: string | null) => void;
 	}
 
-	let { moves, currentFen, startFen, repertoireColor, onNavigateToLine, onPreviewFen }: Props =
-		$props();
+	let {
+		moves,
+		currentFen,
+		startFen,
+		repertoireColor,
+		cardStates,
+		onNavigateToLine,
+		onPreviewFen
+	}: Props = $props();
 
 	const NODE_WIDTH = 64;
 	const NODE_HEIGHT = 36;
@@ -94,6 +110,21 @@
 
 	const currentFenKey = $derived(fenKey(currentFen));
 
+	const MATURE_SCHEDULED_DAYS = 21; // matches the app's existing "mature" convention
+	const STRUGGLE_LAPSE_THRESHOLD = 3;
+
+	function cardStateKey(fromKey: string, san: string): string {
+		return `${fromKey}|${san}`;
+	}
+
+	const cardStateByKey = $derived.by(() => {
+		const map = new Map<string, CardState>();
+		for (const cs of cardStates) {
+			map.set(cardStateKey(fenKey(cs.fromFen), cs.san), cs);
+		}
+		return map;
+	});
+
 	function pointsToPath(points: { x: number; y: number }[]): string {
 		if (points.length === 0) return '';
 		return points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
@@ -115,6 +146,23 @@
 		const moverColor = activeColor === 'w' ? 'b' : 'w';
 		const ownColor = repertoireColor === 'WHITE' ? 'w' : 'b';
 		return moverColor === ownColor;
+	}
+
+	function getCardState(node: LaidOutNode): CardState | undefined {
+		if (node.fromKey === null || node.pathSans.length === 0) return undefined;
+		const san = node.pathSans[node.pathSans.length - 1];
+		return cardStateByKey.get(cardStateKey(node.fromKey, san));
+	}
+
+	function isMature(node: LaidOutNode): boolean {
+		const cs = getCardState(node);
+		return !!cs && cs.state === 2 && (cs.scheduledDays ?? 0) > MATURE_SCHEDULED_DAYS;
+	}
+
+	function isStruggling(node: LaidOutNode): boolean {
+		const cs = getCardState(node);
+		if (!cs) return false;
+		return (cs.lapses ?? 0) >= STRUGGLE_LAPSE_THRESHOLD && !isMature(node);
 	}
 
 	function handleNodeClick(node: LaidOutNode) {
@@ -262,6 +310,8 @@
 						class:is-root={node.pathSans.length === 0}
 						class:is-own={isOwnMove(node)}
 						class:is-opponent={node.pathSans.length > 0 && !isOwnMove(node)}
+						class:is-mature={isMature(node)}
+						class:is-struggling={isStruggling(node)}
 						style="left: {node.x - NODE_WIDTH / 2}px; top: {node.y - NODE_HEIGHT / 2}px; width: {NODE_WIDTH}px; height: {NODE_HEIGHT}px;"
 						onclick={() => handleNodeClickGuarded(node)}
 						onmouseenter={() => {
@@ -392,5 +442,27 @@
 		background: var(--color-surface);
 		border: 1px solid var(--color-border);
 		color: var(--color-text-muted);
+	}
+
+	/*
+	 * Maturity and struggle markers — own-move nodes only. Deliberately kept
+	 * on separate visual channels (border vs. a corner dot) from is-own's
+	 * background and is-current's box-shadow ring, so any combination of
+	 * these states renders correctly without one overriding another.
+	 */
+	.graph-node.is-mature {
+		border: 2px solid var(--color-success);
+	}
+
+	.graph-node.is-struggling::after {
+		content: '';
+		position: absolute;
+		top: -3px;
+		right: -3px;
+		width: 10px;
+		height: 10px;
+		border-radius: 50%;
+		background: var(--color-danger);
+		border: 1.5px solid var(--color-surface);
 	}
 </style>
