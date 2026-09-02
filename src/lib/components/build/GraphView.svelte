@@ -29,9 +29,11 @@
 		startFen: string | null;
 		repertoireColor: 'WHITE' | 'BLACK';
 		onNavigateToLine: (sans: string[]) => void;
+		onPreviewFen: (fen: string | null) => void;
 	}
 
-	let { moves, currentFen, startFen, repertoireColor, onNavigateToLine }: Props = $props();
+	let { moves, currentFen, startFen, repertoireColor, onNavigateToLine, onPreviewFen }: Props =
+		$props();
 
 	const NODE_WIDTH = 64;
 	const NODE_HEIGHT = 36;
@@ -116,6 +118,7 @@
 	}
 
 	function handleNodeClick(node: LaidOutNode) {
+		onPreviewFen(null);
 		onNavigateToLine(node.pathSans);
 	}
 
@@ -261,6 +264,10 @@
 						class:is-opponent={node.pathSans.length > 0 && !isOwnMove(node)}
 						style="left: {node.x - NODE_WIDTH / 2}px; top: {node.y - NODE_HEIGHT / 2}px; width: {NODE_WIDTH}px; height: {NODE_HEIGHT}px;"
 						onclick={() => handleNodeClickGuarded(node)}
+						onmouseenter={() => {
+							if (!isDragging) onPreviewFen(node.fen);
+						}}
+						onmouseleave={() => onPreviewFen(null)}
 					>
 						{nodeLabel(node)}
 					</button>
