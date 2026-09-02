@@ -888,6 +888,8 @@
 			 */
 			width: 100vw;
 			max-width: 2200px;
+			box-sizing: border-box;
+			padding: 0 var(--space-6);
 			margin-left: calc(50% - 50vw);
 			margin-right: calc(50% - 50vw);
 		}
