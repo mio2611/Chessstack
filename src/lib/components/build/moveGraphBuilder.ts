@@ -36,6 +36,7 @@ interface MoveEdge {
 export interface GraphNode {
 	fenKey: string;
 	fen: string; // one representative FEN for this position (all incoming edges share the same fenKey)
+	fromKey: string | null; // fenKey of the representative edge's origin — null for the root
 	ply: number; // BFS distance from the root — used as a layout hint, not a move number
 	pathSans: string[]; // one representative path from the root, for click-to-navigate
 }
@@ -100,7 +101,7 @@ export function buildMoveGraph(moves: MoveInput[], startFen: string | null): Mov
 	const rootKey = fenKey(rootFen);
 
 	const nodes = new Map<string, GraphNode>();
-	nodes.set(rootKey, { fenKey: rootKey, fen: rootFen, ply: 0, pathSans: [] });
+	nodes.set(rootKey, { fenKey: rootKey, fen: rootFen, fromKey: null, ply: 0, pathSans: [] });
 
 	const edges: GraphEdge[] = [];
 	const queue: Array<{ key: string; ply: number; path: string[] }> = [
@@ -127,6 +128,7 @@ export function buildMoveGraph(moves: MoveInput[], startFen: string | null): Mov
 				nodes.set(toKey, {
 					fenKey: toKey,
 					fen: edge.toFen,
+					fromKey: current.key,
 					ply: current.ply + 1,
 					pathSans: nodePath
 				});

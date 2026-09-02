@@ -352,6 +352,7 @@
 			currentFen={s.currentFen}
 			startFen={s.startFen}
 			repertoireColor={data.repertoire.color as 'WHITE' | 'BLACK'}
+			cardStates={data.cardStates}
 			onNavigateToLine={s.navigateToLine}
 			onPreviewFen={(fen) => (previewFen = fen)}
 		/>
