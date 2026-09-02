@@ -68,6 +68,11 @@
 
 	// ── Eval bar state ────────────────────────────────────────────────────────
 	let evalCp = $state<number | null>(null);
+	// Hover preview: the graph lets you preview a position on the board
+	// without changing your actual working position (s.currentFen), so you
+	// can check neighboring/before/after positions without losing track of
+	// what you're editing. null = not previewing, show the real position.
+	let previewFen = $state<string | null>(null);
 	let evalMate = $state<number | null>(null);
 
 	// ── Board resize ─────────────────────────────────────────────────────────
@@ -348,6 +353,7 @@
 			startFen={s.startFen}
 			repertoireColor={data.repertoire.color as 'WHITE' | 'BLACK'}
 			onNavigateToLine={s.navigateToLine}
+			onPreviewFen={(fen) => (previewFen = fen)}
 		/>
 	</div>
 
@@ -424,13 +430,13 @@
 				<EvalBar {evalCp} {evalMate} {orientation} />
 				{#key s.boardKey}
 					<ChessBoard
-						fen={s.currentFen}
+						fen={previewFen ?? s.currentFen}
 						{orientation}
 						boardTheme={data.settings?.boardTheme ?? 'blue'}
-						interactive={!s.saving}
-						lastMove={s.lastMove}
+						interactive={!s.saving && !previewFen}
+						lastMove={previewFen ? undefined : s.lastMove}
 						onMove={s.handleMove}
-						autoShapes={boardShapes}
+						autoShapes={previewFen ? [] : boardShapes}
 					/>
 				{/key}
 			</div>
