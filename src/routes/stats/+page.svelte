@@ -1,12 +1,12 @@
 <script lang="ts">
-	import type { PageData } from './$types';
+	import { SvelteDate } from 'svelte/reactivity';
 
 	let { data }: { data: PageData } = $props();
 
 	// ── Deck Composition donut (pure CSS conic-gradient, no chart library) ─
 	const composition = $derived(data.deckComposition);
 	const donutGradient = $derived.by(() => {
-		const { new_, youngLearning, mature, total } = composition;
+		const { new_, youngLearning, total } = composition;
 		if (total === 0) return 'var(--color-border)';
 		const newPct = (new_ / total) * 100;
 		const youngPct = (youngLearning / total) * 100;
@@ -33,7 +33,7 @@
 	function dayLabel(offset: number): string {
 		if (offset === 0) return 'Today';
 		if (offset === 1) return 'Tomorrow';
-		const d = new Date();
+		const d = new SvelteDate();
 		d.setUTCDate(d.getUTCDate() + offset);
 		return d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' });
 	}

@@ -21,7 +21,20 @@
 	import { buildMoveGraph, type GraphNode, type GraphEdge } from './moveGraphBuilder';
 	import { untrack } from 'svelte';
 	import type { RepertoireMove } from './buildState.svelte';
-	import { fenKey } from '$lib/fen';
+	import { SvelteMap } from 'svelte/reactivity';
+
+	// Inlined locally under a distinct name rather than imported from
+	// $lib/fen: importing the shared fenKey here (or even a locally-defined
+	// function reusing that exact name) reproducibly broke one specific
+	// $derived (currentFenKey) at runtime with "ReferenceError: fenKey is
+	// not defined". Root cause: this file bundles into the same chunk as
+	// buildState.svelte.ts, which also uses the shared fenKey import —
+	// Rollup's collision-renaming (fenKey -> fenKey$1) apparently isn't
+	// consistently reflected in every Svelte-compiler-generated reference.
+	// Using a name with zero collision risk sidesteps it entirely.
+	function graphFenKey(fen: string): string {
+		return fen.split(' ').slice(0, 4).join(' ');
+	}
 
 	interface CardState {
 		fromFen: string;
@@ -108,7 +121,7 @@
 		return { nodes, edges, width: graphData.width ?? 0, height: graphData.height ?? 0 };
 	});
 
-	const currentFenKey = $derived(fenKey(currentFen));
+	const currentFenKey = $derived(graphFenKey(currentFen));
 
 	const MATURE_SCHEDULED_DAYS = 21; // matches the app's existing "mature" convention
 	const STRUGGLE_LAPSE_THRESHOLD = 3;
@@ -118,9 +131,9 @@
 	}
 
 	const cardStateByKey = $derived.by(() => {
-		const map = new Map<string, CardState>();
+		const map = new SvelteMap<string, CardState>();
 		for (const cs of cardStates) {
-			map.set(cardStateKey(fenKey(cs.fromFen), cs.san), cs);
+			map.set(cardStateKey(graphFenKey(cs.fromFen), cs.san), cs);
 		}
 		return map;
 	});
@@ -196,7 +209,7 @@
 		const nodeList = layout.nodes;
 		const node = nodeList.find((n) => n.fenKey === key);
 		if (!node) return;
-
+    
 		untrack(() => {
 			if (!viewport) return;
 			const rect = viewport.getBoundingClientRect();
