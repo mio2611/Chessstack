@@ -67,7 +67,7 @@
 
 {#snippet listItems(items: ListItem[])}
 	<ul>
-		{#each items as item}
+		{#each items as item, i (i)}
 			<li>
 				{item.text}
 				{#if item.children.length > 0}
@@ -79,7 +79,7 @@
 {/snippet}
 
 <div class="note-text-content">
-	{#each blocks as block}
+	{#each blocks as block, i (i)}
 		{#if block.type === 'p'}
 			<p>{block.text}</p>
 		{:else}

@@ -621,7 +621,7 @@
 	// Fixed the same way: a real ply count via BFS from STARTING_FEN through
 	// the full move tree, converted to a standard fullmove number.
 	const plyDepthByFenKey = $derived.by(() => {
-		const adj = new Map<string, RepertoireMove[]>();
+		const adj = new SvelteMap<string, RepertoireMove[]>();
 		for (const m of allMoves) {
 			const key = fenKey(m.fromFen);
 			const list = adj.get(key);
@@ -630,7 +630,7 @@
 		}
 
 		const rootKey = fenKey(STARTING_FEN);
-		const depths = new Map<string, number>([[rootKey, 0]]);
+		const depths = new SvelteMap<string, number>([[rootKey, 0]]);
 		const queue: string[] = [rootKey];
 		while (queue.length > 0) {
 			const current = queue.shift()!;
