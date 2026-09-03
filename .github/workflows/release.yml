@@ -1,7 +1,9 @@
 # GitHub Actions Release workflow
 #
-# Builds a Docker image (amd64) and pushes it to the GitHub Container
-# Registry (ghcr.io) whenever a version tag is pushed.
+# Builds a multi-arch Docker image (amd64 + arm64) and pushes it to the
+# GitHub Container Registry (ghcr.io) whenever a version tag is pushed.
+# The arm64 build runs under QEMU emulation on the GitHub-hosted runner,
+# so it takes noticeably longer than an amd64-only build (expect 15-25min).
 #
 # Usage:
 #   git tag v1.0.0
@@ -42,12 +44,17 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Step 2: Set up Docker Buildx, which is the builder backend that
-      # supports build caching.
+      # Step 2: Register QEMU emulators so the amd64 runner can build an
+      # arm64 image (needed for the Synology NAS, RTD1619B / ARM64).
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      # Step 3: Set up Docker Buildx, which is the builder backend that
+      # supports multi-platform builds and build caching.
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # Step 3: Authenticate with the GitHub Container Registry.
+      # Step 4: Authenticate with the GitHub Container Registry.
       # GITHUB_TOKEN is provided automatically by GitHub Actions.
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -56,7 +63,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Step 4: Generate Docker tags from the git tag.
+      # Step 5: Generate Docker tags from the git tag.
       # For a tag like v1.2.3, this produces:
       #   ghcr.io/pvttwinkle/chessstack:v1.2.3
       #   ghcr.io/pvttwinkle/chessstack:v1.2
@@ -73,14 +80,17 @@ jobs:
             type=semver,pattern=v{{major}}
             type=raw,value=latest
 
-      # Step 5: Build for amd64 and push to GHCR.
+      # Step 6: Build for amd64 + arm64 and push a single multi-arch
+      # manifest to GHCR under each tag. Docker automatically pulls the
+      # right platform image, no separate -amd64/-arm64 tags needed.
       # The GitHub Actions layer cache speeds up rebuilds when only source
-      # code changes (the npm ci layer is cached).
+      # code changes (the npm ci layer is cached), though the cache is
+      # keyed per-platform so arm64 gets its own cache lane.
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
