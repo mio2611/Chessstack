@@ -448,7 +448,8 @@
 	}
 
 	.graph-node.is-current {
-		box-shadow: 0 0 0 2px #fff;
+		box-shadow: 0 0 0 3px var(--color-current);
+		transform: scale(1.12);
 	}
 
 	.graph-node.is-root {
@@ -464,7 +465,7 @@
 	 * these states renders correctly without one overriding another.
 	 */
 	.graph-node.is-mature {
-		border: 2px solid var(--color-success);
+		border: 3px solid var(--color-success);
 	}
 
 	.graph-node.is-struggling::after {

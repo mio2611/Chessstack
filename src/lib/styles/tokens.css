@@ -18,6 +18,7 @@
 	--color-text-muted: #5c5c66;
 	--color-success: #3fb06e;
 	--color-danger: #e05454;
+	--color-current: #c084fc;
 	--color-explore: #67b8d4;
 	--color-explore-glow: rgba(103, 184, 212, 0.15);
 	--color-eval-best: #5ba3d9;
@@ -110,6 +111,7 @@
 	--color-text-muted: #8b949e;
 	--color-success: #16a34a;
 	--color-danger: #dc2626;
+	--color-current: #7c3aed;
 	--color-explore: #0891b2;
 	--color-explore-glow: rgba(8, 145, 178, 0.12);
 	--color-eval-best: #2563a8;
