@@ -19,7 +19,7 @@ import {
 	text,
 	timestamp,
 	unique,
-	AnyPgColumn
+	type AnyPgColumn
 } from 'drizzle-orm/pg-core';
 
 // ─────────────────────────────────────────────────────────────────────────────
