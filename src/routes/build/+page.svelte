@@ -39,7 +39,8 @@
 	import GraphView from '$lib/components/build/GraphView.svelte';
 	import AnnotationModal from '$lib/components/build/AnnotationModal.svelte';
 	import ImportPgnModal from '$lib/components/build/ImportPgnModal.svelte';
-	import { createBuildState, STARTING_FEN, fenKey } from '$lib/components/build/buildState.svelte';
+	import { createBuildState, STARTING_FEN } from '$lib/components/build/buildState.svelte';
+	import { fenKey } from '$lib/fen';
 	import { invalidateAll } from '$app/navigation';
 	import { onMount, untrack } from 'svelte';
 	import type { PageData } from './$types';
