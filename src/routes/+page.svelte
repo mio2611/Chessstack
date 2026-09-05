@@ -84,7 +84,6 @@
 			: data.gaps.filter((g) => getGapSection(g.depth) === selectedGapSection)
 	);
 
-
 	// ── Health prompt (actionable hint for the weakest factor) ─────────
 	let healthPrompt = $derived.by(() => {
 		if (data.totalCards === 0 || data.healthScore >= 80) return null;
