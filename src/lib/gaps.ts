@@ -46,7 +46,10 @@ interface MoveRow {
  * @param color      Which side the user plays ("WHITE" or "BLACK")
  * @param startFens  Optional start FENs — only positions reachable from these
  *                   are checked for gaps. Defaults to [STARTING_FEN].
- * @returns          Sorted array of Gap objects (shallowest first)
+ * @returns          Sorted array of Gap objects (highest gamesPlayed first).
+ *                   Note: this docstring previously said "shallowest first",
+ *                   which was already stale before this change — the sort
+ *                   has been by popularityPct descending, not by depth.
  */
 export function computeGaps(
 	moves: MoveRow[],
@@ -163,14 +166,19 @@ export function computeGaps(
 		});
 	}
 
-	// Sort by popularity (descending) first, falling back to depth for any
-	// gap that somehow lacks a popularity figure.
+	// Sort by raw exposure (games played, descending) first, so gaps the
+	// user is actually most likely to face come up top regardless of their
+	// share of the position — falling back to depth for any gap that
+	// somehow lacks a games-played figure. The minGames / minPopularityPct
+	// filters applied upstream in loadGapData are unaffected by this: a
+	// move must still clear the popularity floor to be considered a gap at
+	// all, this only changes the ranking among moves that already cleared it.
 	gaps.sort((a, b) => {
-		if (a.popularityPct !== undefined && b.popularityPct !== undefined) {
-			return b.popularityPct - a.popularityPct;
+		if (a.gamesPlayed !== undefined && b.gamesPlayed !== undefined) {
+			return b.gamesPlayed - a.gamesPlayed;
 		}
-		if (a.popularityPct !== undefined) return -1;
-		if (b.popularityPct !== undefined) return 1;
+		if (a.gamesPlayed !== undefined) return -1;
+		if (b.gamesPlayed !== undefined) return 1;
 		return a.depth - b.depth;
 	});
 
