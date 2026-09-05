@@ -13,9 +13,16 @@
 	--color-accent: #4a8ac2;
 	--color-accent-dim: #3a6d9e;
 	--color-accent-glow: rgba(74, 138, 194, 0.18);
+	/* text-secondary and text-muted are tuned to APCA (not just WCAG 2.x
+	   ratio) against --color-surface: WCAG 2.x's contrast math overstates
+	   perceived contrast on dark backgrounds, so a pair that "passes" by
+	   ratio can still read as too faint here. Targets: secondary ~Lc 75
+	   (preferred for body text), muted ~Lc 60 (floor for actual content
+	   text, not just decorative/disabled UI). Re-check with an APCA
+	   calculator (e.g. apcacontrast.com) before changing either value. */
 	--color-text-primary: #ececef;
-	--color-text-secondary: #a0a2ac;
-	--color-text-muted: #5c5c66;
+	--color-text-secondary: #cccdd2;
+	--color-text-muted: #b3b3ba;
 	--color-success: #3fb06e;
 	--color-danger: #e05454;
 	--color-current: #c084fc;
