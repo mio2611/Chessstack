@@ -1,0 +1,228 @@
+diff --git a/src/lib/stockfish/evalCache.ts b/src/lib/stockfish/evalCache.ts
+index 627fb41..a625710 100644
+--- a/src/lib/stockfish/evalCache.ts
++++ b/src/lib/stockfish/evalCache.ts
+@@ -43,29 +43,37 @@ export async function getCachedEval(fen: string): Promise<PositionEval> {
+ 
+ 	if (cached) return cached;
+ 
+-	const moves = await getTopMoves(fen, POSITION_EVAL_DEPTH, 1, EVAL_TIMEOUT_MS);
++	const { moves, completed } = await getTopMoves(fen, POSITION_EVAL_DEPTH, 1, EVAL_TIMEOUT_MS);
+ 	const best = moves[0];
+ 	const result: PositionEval = {
+ 		evalCp: best?.scoreCp ?? null,
+ 		evalMate: best?.scoreMate ?? null
+ 	};
+ 
+-	// Best-effort write. A losing race on the same (fen, depth) from a
+-	// concurrent request is fine — the eval is objective, so the discarded
+-	// row would have held the same value anyway (or the position simply
+-	// gets recomputed once more on a future miss, no correctness impact).
+-	try {
+-		await db
+-			.insert(positionEvalCache)
+-			.values({
+-				fen,
+-				depth: POSITION_EVAL_DEPTH,
+-				evalCp: result.evalCp,
+-				evalMate: result.evalMate
+-			})
+-			.onConflictDoNothing();
+-	} catch (err) {
+-		console.error('[chessstack] Failed to persist position eval cache entry:', err);
++	// Only persist if Stockfish actually finished POSITION_EVAL_DEPTH before
++	// EVAL_TIMEOUT_MS. Otherwise `moves` is a partial result from whatever
++	// shallower depth the search reached — caching it under the label
++	// POSITION_EVAL_DEPTH would silently misrepresent it as a full-depth eval.
++	// The uncached result is still returned so this visit isn't wasted, but
++	// the next visit will simply retry rather than trust a truncated eval.
++	if (completed) {
++		// Best-effort write. A losing race on the same (fen, depth) from a
++		// concurrent request is fine — the eval is objective, so the discarded
++		// row would have held the same value anyway (or the position simply
++		// gets recomputed once more on a future miss, no correctness impact).
++		try {
++			await db
++				.insert(positionEvalCache)
++				.values({
++					fen,
++					depth: POSITION_EVAL_DEPTH,
++					evalCp: result.evalCp,
++					evalMate: result.evalMate
++				})
++				.onConflictDoNothing();
++		} catch (err) {
++			console.error('[chessstack] Failed to persist position eval cache entry:', err);
++		}
+ 	}
+ 
+ 	return result;
+diff --git a/src/lib/stockfish/index.ts b/src/lib/stockfish/index.ts
+index ae868c9..5617cab 100644
+--- a/src/lib/stockfish/index.ts
++++ b/src/lib/stockfish/index.ts
+@@ -199,6 +199,18 @@ export async function* streamTopMoves(
+ 	}
+ }
+ 
++// Result of getTopMoves(). `completed` is true only when Stockfish sent
++// "bestmove" for the requested depth before the timeout fired — i.e. `moves`
++// genuinely reflects `depth`. If the timeout cut the search short, `moves`
++// still holds whatever partial results were accumulated (deliberately, so
++// callers who don't care about precision can still use them), but
++// `completed` is false so callers who DO care (e.g. anything that persists
++// results tagged with a depth) can tell the two cases apart.
++export interface TopMovesResult {
++	moves: StockfishMove[];
++	completed: boolean;
++}
++
+ // Asks Stockfish to analyse a position and return its top candidate moves.
+ //
+ // fen       — position to analyse, in FEN notation
+@@ -206,13 +218,14 @@ export async function* streamTopMoves(
+ // numMoves  — how many candidates to return (controls the MultiPV setting)
+ // timeoutMs — how long to wait before returning partial results (user-configurable)
+ //
+-// Returns [] without throwing if the engine is unavailable.
++// Returns { moves: [], completed: false } without throwing if the engine is
++// unavailable.
+ export async function getTopMoves(
+ 	fen: string,
+ 	depth: number,
+ 	numMoves: number,
+ 	timeoutMs: number = DEFAULT_TIMEOUT_MS
+-): Promise<StockfishMove[]> {
++): Promise<TopMovesResult> {
+ 	return new Promise((resolve) => {
+ 		// bestResults maps MultiPV index (1-based) → latest result for that PV.
+ 		// We overwrite on every new "info" line so we always keep the deepest result.
+@@ -222,17 +235,18 @@ export async function getTopMoves(
+ 
+ 		// Guard: ensure we only resolve once (timeout, bestmove, or process exit
+ 		// can all race to resolve).
+-		const resolveOnce = (results: StockfishMove[]) => {
++		const resolveOnce = (result: TopMovesResult) => {
+ 			if (resolved) return;
+ 			resolved = true;
+ 			clearTimeout(timer);
+-			resolve(results);
++			resolve(result);
+ 		};
+ 
+ 		// Collect whatever results we have so far, kill the process, and resolve.
+-		const finish = () => {
++		// `completed` distinguishes a real "bestmove" from a timeout/close cutoff.
++		const finish = (completed: boolean) => {
+ 			const sorted = [...bestResults.entries()].sort(([a], [b]) => a - b).map(([, v]) => v);
+-			resolveOnce(sorted);
++			resolveOnce({ moves: sorted, completed });
+ 			proc.kill('SIGKILL');
+ 		};
+ 
+@@ -247,7 +261,7 @@ export async function getTopMoves(
+ 				'[chessstack] Stockfish binary not found at %s — engine analysis unavailable.',
+ 				STOCKFISH_BIN
+ 			);
+-			resolve([]);
++			resolve({ moves: [], completed: false });
+ 			return;
+ 		}
+ 
+@@ -256,8 +270,8 @@ export async function getTopMoves(
+ 		const stdout = proc.stdout!;
+ 
+ 		// Safety net: if analysis takes too long, return partial results rather
+-		// than hanging the request indefinitely.
+-		const timer = setTimeout(finish, timeoutMs);
++		// than hanging the request indefinitely. Not a real completion.
++		const timer = setTimeout(() => finish(false), timeoutMs);
+ 
+ 		// UCI handshake. stdin is available immediately after spawn — no "connect"
+ 		// event needed. We set MultiPV before "isready" so the option is in place
+@@ -301,24 +315,26 @@ export async function getTopMoves(
+ 						scoreMate: mateMatch ? parseInt(mateMatch[1], 10) : null
+ 					});
+ 				} else if (line.startsWith('bestmove')) {
+-					// "bestmove" signals that Stockfish has finished. Return what we have.
+-					finish();
++					// "bestmove" signals that Stockfish actually finished the
++					// requested depth. Return what we have as a completed result.
++					finish(true);
+ 				}
+ 			}
+ 		});
+ 
+-		// If the binary is not found or crashes, resolve with an empty array
+-		// instead of letting the request hang or throw an unhandled error.
++		// If the binary is not found or crashes, resolve with an empty,
++		// not-completed result instead of letting the request hang or throw
++		// an unhandled error.
+ 		proc.on('error', (err) => {
+ 			console.error('[chessstack] Stockfish process error:', err.message);
+-			resolveOnce([]);
++			resolveOnce({ moves: [], completed: false });
+ 		});
+ 
+ 		// If the process exits before bestmove (unexpected), resolve with
+-		// whatever partial results we have.
++		// whatever partial results we have. Not a real completion.
+ 		proc.on('close', () => {
+ 			const sorted = [...bestResults.entries()].sort(([a], [b]) => a - b).map(([, v]) => v);
+-			resolveOnce(sorted);
++			resolveOnce({ moves: sorted, completed: false });
+ 		});
+ 	});
+ }
+diff --git a/src/routes/api/stockfish/+server.ts b/src/routes/api/stockfish/+server.ts
+index 2d69366..2292d8f 100644
+--- a/src/routes/api/stockfish/+server.ts
++++ b/src/routes/api/stockfish/+server.ts
+@@ -17,6 +17,7 @@
+ import { json, error } from '@sveltejs/kit';
+ import type { RequestHandler } from './$types';
+ import { getTopMoves } from '$lib/stockfish';
++import type { TopMovesResult } from '$lib/stockfish';
+ import { db } from '$lib/db';
+ import { bookMove, ecoOpening, userSettings } from '$lib/db/schema';
+ import { eq, inArray } from 'drizzle-orm';
+@@ -95,8 +96,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
+ 	// Request exactly numMoves PVs — the engine section is independent of the
+ 	// book section, so we only need the top N engine candidates.
+ 	// Skipped when mode is 'book' (caller only wants opening book results).
+-	const engineResults =
+-		mode !== 'book' ? await getTopMoves(fen, depth, numMoves, timeoutSec * 1000) : [];
++	const engineResult: TopMovesResult =
++		mode !== 'book'
++			? await getTopMoves(fen, depth, numMoves, timeoutSec * 1000)
++			: { moves: [], completed: false };
++	const engineResults = engineResult.moves;
+ 	const engineAvailable = mode !== 'book' ? engineResults.length > 0 : false;
+ 
+ 	// Stockfish scores are from the side-to-move's perspective. Multiply by this
+diff --git a/src/routes/api/stockfish/batch/+server.ts b/src/routes/api/stockfish/batch/+server.ts
+index 047eb3c..9a0b265 100644
+--- a/src/routes/api/stockfish/batch/+server.ts
++++ b/src/routes/api/stockfish/batch/+server.ts
+@@ -70,7 +70,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
+ 						const chess = new Chess(fen);
+ 						const whiteMultiplier = chess.turn() === 'w' ? 1 : -1;
+ 
+-						const moves = await getTopMoves(fen, BATCH_DEPTH, 1, POSITION_TIMEOUT_MS);
++						const { moves } = await getTopMoves(fen, BATCH_DEPTH, 1, POSITION_TIMEOUT_MS);
+ 						if (moves.length > 0) {
+ 							const best = moves[0];
+ 							evalCp = best.scoreCp != null ? best.scoreCp * whiteMultiplier : null;
+diff --git a/src/routes/api/train/evaluate/+server.ts b/src/routes/api/train/evaluate/+server.ts
+index cb0389a..8562612 100644
+--- a/src/routes/api/train/evaluate/+server.ts
++++ b/src/routes/api/train/evaluate/+server.ts
+@@ -73,7 +73,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
+ 	const currentRating = settings?.trainerRating ?? 1200;
+ 
+ 	// Run Stockfish evaluation (only need 1 PV for the eval score)
+-	const engineResults = await getTopMoves(fen, depth, 1, timeoutSec * 1000);
++	const { moves: engineResults } = await getTopMoves(fen, depth, 1, timeoutSec * 1000);
+ 
+ 	const result: TrainerEvalResult = {
+ 		evalCp: null,

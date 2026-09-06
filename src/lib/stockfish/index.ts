@@ -199,6 +199,18 @@ export async function* streamTopMoves(
 	}
 }
 
+// Result of getTopMoves(). `completed` is true only when Stockfish sent
+// "bestmove" for the requested depth before the timeout fired — i.e. `moves`
+// genuinely reflects `depth`. If the timeout cut the search short, `moves`
+// still holds whatever partial results were accumulated (deliberately, so
+// callers who don't care about precision can still use them), but
+// `completed` is false so callers who DO care (e.g. anything that persists
+// results tagged with a depth) can tell the two cases apart.
+export interface TopMovesResult {
+	moves: StockfishMove[];
+	completed: boolean;
+}
+
 // Asks Stockfish to analyse a position and return its top candidate moves.
 //
 // fen       — position to analyse, in FEN notation
@@ -206,13 +218,14 @@ export async function* streamTopMoves(
 // numMoves  — how many candidates to return (controls the MultiPV setting)
 // timeoutMs — how long to wait before returning partial results (user-configurable)
 //
-// Returns [] without throwing if the engine is unavailable.
+// Returns { moves: [], completed: false } without throwing if the engine is
+// unavailable.
 export async function getTopMoves(
 	fen: string,
 	depth: number,
 	numMoves: number,
 	timeoutMs: number = DEFAULT_TIMEOUT_MS
-): Promise<StockfishMove[]> {
+): Promise<TopMovesResult> {
 	return new Promise((resolve) => {
 		// bestResults maps MultiPV index (1-based) → latest result for that PV.
 		// We overwrite on every new "info" line so we always keep the deepest result.
@@ -222,17 +235,18 @@ export async function getTopMoves(
 
 		// Guard: ensure we only resolve once (timeout, bestmove, or process exit
 		// can all race to resolve).
-		const resolveOnce = (results: StockfishMove[]) => {
+		const resolveOnce = (result: TopMovesResult) => {
 			if (resolved) return;
 			resolved = true;
 			clearTimeout(timer);
-			resolve(results);
+			resolve(result);
 		};
 
 		// Collect whatever results we have so far, kill the process, and resolve.
-		const finish = () => {
+		// `completed` distinguishes a real "bestmove" from a timeout/close cutoff.
+		const finish = (completed: boolean) => {
 			const sorted = [...bestResults.entries()].sort(([a], [b]) => a - b).map(([, v]) => v);
-			resolveOnce(sorted);
+			resolveOnce({ moves: sorted, completed });
 			proc.kill('SIGKILL');
 		};
 
@@ -247,7 +261,7 @@ export async function getTopMoves(
 				'[chessstack] Stockfish binary not found at %s — engine analysis unavailable.',
 				STOCKFISH_BIN
 			);
-			resolve([]);
+			resolve({ moves: [], completed: false });
 			return;
 		}
 
@@ -256,8 +270,8 @@ export async function getTopMoves(
 		const stdout = proc.stdout!;
 
 		// Safety net: if analysis takes too long, return partial results rather
-		// than hanging the request indefinitely.
-		const timer = setTimeout(finish, timeoutMs);
+		// than hanging the request indefinitely. Not a real completion.
+		const timer = setTimeout(() => finish(false), timeoutMs);
 
 		// UCI handshake. stdin is available immediately after spawn — no "connect"
 		// event needed. We set MultiPV before "isready" so the option is in place
@@ -301,24 +315,26 @@ export async function getTopMoves(
 						scoreMate: mateMatch ? parseInt(mateMatch[1], 10) : null
 					});
 				} else if (line.startsWith('bestmove')) {
-					// "bestmove" signals that Stockfish has finished. Return what we have.
-					finish();
+					// "bestmove" signals that Stockfish actually finished the
+					// requested depth. Return what we have as a completed result.
+					finish(true);
 				}
 			}
 		});
 
-		// If the binary is not found or crashes, resolve with an empty array
-		// instead of letting the request hang or throw an unhandled error.
+		// If the binary is not found or crashes, resolve with an empty,
+		// not-completed result instead of letting the request hang or throw
+		// an unhandled error.
 		proc.on('error', (err) => {
 			console.error('[chessstack] Stockfish process error:', err.message);
-			resolveOnce([]);
+			resolveOnce({ moves: [], completed: false });
 		});
 
 		// If the process exits before bestmove (unexpected), resolve with
-		// whatever partial results we have.
+		// whatever partial results we have. Not a real completion.
 		proc.on('close', () => {
 			const sorted = [...bestResults.entries()].sort(([a], [b]) => a - b).map(([, v]) => v);
-			resolveOnce(sorted);
+			resolveOnce({ moves: sorted, completed: false });
 		});
 	});
 }

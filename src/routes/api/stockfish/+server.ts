@@ -17,6 +17,7 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getTopMoves } from '$lib/stockfish';
+import type { TopMovesResult } from '$lib/stockfish';
 import { db } from '$lib/db';
 import { bookMove, ecoOpening, userSettings } from '$lib/db/schema';
 import { eq, inArray } from 'drizzle-orm';
@@ -95,8 +96,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	// Request exactly numMoves PVs — the engine section is independent of the
 	// book section, so we only need the top N engine candidates.
 	// Skipped when mode is 'book' (caller only wants opening book results).
-	const engineResults =
-		mode !== 'book' ? await getTopMoves(fen, depth, numMoves, timeoutSec * 1000) : [];
+	const engineResult: TopMovesResult =
+		mode !== 'book'
+			? await getTopMoves(fen, depth, numMoves, timeoutSec * 1000)
+			: { moves: [], completed: false };
+	const engineResults = engineResult.moves;
 	const engineAvailable = mode !== 'book' ? engineResults.length > 0 : false;
 
 	// Stockfish scores are from the side-to-move's perspective. Multiply by this
