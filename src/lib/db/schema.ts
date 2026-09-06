@@ -535,6 +535,10 @@ export const trainerSession = pgTable(
 		ratingBefore: integer('rating_before'), // null if unrated
 		ratingAfter: integer('rating_after'), // null if unrated
 		moveSource: text('move_source').notNull(), // 'PLAYERS' or 'MASTERS'
+		// true when the Stockfish evaluation was cut short by the timeout (no
+		// "bestmove" received) — finalEvalCp may be a partial-depth value and
+		// was never used to adjust trainerRating even if `rated` was requested.
+		evalUnreliable: boolean('eval_unreliable').notNull().default(false),
 		completedAt: timestamp('completed_at').notNull()
 	},
 	(table) => ({
