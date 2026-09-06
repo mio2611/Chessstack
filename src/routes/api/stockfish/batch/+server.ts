@@ -70,7 +70,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 						const chess = new Chess(fen);
 						const whiteMultiplier = chess.turn() === 'w' ? 1 : -1;
 
-						const moves = await getTopMoves(fen, BATCH_DEPTH, 1, POSITION_TIMEOUT_MS);
+						const { moves } = await getTopMoves(fen, BATCH_DEPTH, 1, POSITION_TIMEOUT_MS);
 						if (moves.length > 0) {
 							const best = moves[0];
 							evalCp = best.scoreCp != null ? best.scoreCp * whiteMultiplier : null;
