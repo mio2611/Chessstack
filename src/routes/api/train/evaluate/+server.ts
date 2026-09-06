@@ -73,7 +73,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const currentRating = settings?.trainerRating ?? 1200;
 
 	// Run Stockfish evaluation (only need 1 PV for the eval score)
-	const { moves: engineResults } = await getTopMoves(fen, depth, 1, timeoutSec * 1000);
+	const { moves: engineResults, completed } = await getTopMoves(fen, depth, 1, timeoutSec * 1000);
 
 	const result: TrainerEvalResult = {
 		evalCp: null,
@@ -101,9 +101,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		if (result.evalCp != null) {
 			result.score = evalToScore(result.evalCp, playerColor);
 
-			if (isRated && settings) {
+			if (isRated && settings && completed) {
 				// Use bracket midpoint as opponent rating for Elo calculation.
 				// Masters mode uses null bracket (midpoint defaults to 2500).
+				// Gated on `completed`: a timeout-truncated eval must never move
+				// trainerRating, even if the client requested a rated session.
 				const opponentMid = bracketMidpoint(ratingBracket ?? null);
 				const ratingChange = computeRatingChange(result.score, opponentMid, currentRating);
 				result.ratingBefore = currentRating;
@@ -135,10 +137,13 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		pgn,
 		movesPlayed,
 		finalEvalCp: storedEvalCp,
-		rated: isRated,
+		// `rated` reflects what actually happened, not just what was requested:
+		// a truncated eval never adjusted trainerRating, so it was not rated.
+		rated: isRated && completed,
 		ratingBefore: result.ratingBefore,
 		ratingAfter: result.ratingAfter,
 		moveSource,
+		evalUnreliable: !completed,
 		completedAt: new Date()
 	});
 
