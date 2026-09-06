@@ -43,29 +43,37 @@ export async function getCachedEval(fen: string): Promise<PositionEval> {
 
 	if (cached) return cached;
 
-	const moves = await getTopMoves(fen, POSITION_EVAL_DEPTH, 1, EVAL_TIMEOUT_MS);
+	const { moves, completed } = await getTopMoves(fen, POSITION_EVAL_DEPTH, 1, EVAL_TIMEOUT_MS);
 	const best = moves[0];
 	const result: PositionEval = {
 		evalCp: best?.scoreCp ?? null,
 		evalMate: best?.scoreMate ?? null
 	};
 
-	// Best-effort write. A losing race on the same (fen, depth) from a
-	// concurrent request is fine — the eval is objective, so the discarded
-	// row would have held the same value anyway (or the position simply
-	// gets recomputed once more on a future miss, no correctness impact).
-	try {
-		await db
-			.insert(positionEvalCache)
-			.values({
-				fen,
-				depth: POSITION_EVAL_DEPTH,
-				evalCp: result.evalCp,
-				evalMate: result.evalMate
-			})
-			.onConflictDoNothing();
-	} catch (err) {
-		console.error('[chessstack] Failed to persist position eval cache entry:', err);
+	// Only persist if Stockfish actually finished POSITION_EVAL_DEPTH before
+	// EVAL_TIMEOUT_MS. Otherwise `moves` is a partial result from whatever
+	// shallower depth the search reached — caching it under the label
+	// POSITION_EVAL_DEPTH would silently misrepresent it as a full-depth eval.
+	// The uncached result is still returned so this visit isn't wasted, but
+	// the next visit will simply retry rather than trust a truncated eval.
+	if (completed) {
+		// Best-effort write. A losing race on the same (fen, depth) from a
+		// concurrent request is fine — the eval is objective, so the discarded
+		// row would have held the same value anyway (or the position simply
+		// gets recomputed once more on a future miss, no correctness impact).
+		try {
+			await db
+				.insert(positionEvalCache)
+				.values({
+					fen,
+					depth: POSITION_EVAL_DEPTH,
+					evalCp: result.evalCp,
+					evalMate: result.evalMate
+				})
+				.onConflictDoNothing();
+		} catch (err) {
+			console.error('[chessstack] Failed to persist position eval cache entry:', err);
+		}
 	}
 
 	return result;

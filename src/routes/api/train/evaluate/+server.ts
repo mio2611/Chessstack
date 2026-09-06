@@ -73,7 +73,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const currentRating = settings?.trainerRating ?? 1200;
 
 	// Run Stockfish evaluation (only need 1 PV for the eval score)
-	const engineResults = await getTopMoves(fen, depth, 1, timeoutSec * 1000);
+	const { moves: engineResults } = await getTopMoves(fen, depth, 1, timeoutSec * 1000);
 
 	const result: TrainerEvalResult = {
 		evalCp: null,
