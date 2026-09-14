@@ -137,6 +137,10 @@ def fetch_source_positions() -> list[EndgamePosition]:
 	return positions
 
 
+TABLEBASE_MAX_ATTEMPTS = 4
+TABLEBASE_RETRY_BASE_SECONDS = 2.0
+
+
 def verify_against_tablebase(pos: EndgamePosition) -> bool:
 	"""Returns True if the tablebase's WDL category agrees with the source's
 	`target` label. 'win'/'cursed-win' count as agreeing with a checkmate
@@ -146,16 +150,38 @@ def verify_against_tablebase(pos: EndgamePosition) -> bool:
 	the literal draw case — blessed-loss is a draw under the 50-move rule
 	from a technically lost position, which does not match a 'draw' target
 	claim, so it is treated as a mismatch on purpose.
-	"""
-	resp = requests.get(TABLEBASE_URL, params={"fen": pos.fen}, timeout=15)
-	resp.raise_for_status()
-	category = resp.json().get("category")
 
-	if pos.target == "checkmate":
-		return category in ("win", "maybe-win", "cursed-win")
-	if pos.target == "draw":
-		return category == "draw"
-	return False
+	Retries transient network/connection failures (timeouts, SSL resets,
+	5xx) with exponential backoff before giving up on a position — over
+	~2900 sequential requests, a handful of one-off connection failures is
+	expected on any network and should not be indistinguishable from a
+	genuine tablebase disagreement. A raised exception after all attempts
+	means the caller should skip the position, not treat it as a mismatch.
+	"""
+	last_exc: requests.RequestException | None = None
+	for attempt in range(1, TABLEBASE_MAX_ATTEMPTS + 1):
+		try:
+			resp = requests.get(TABLEBASE_URL, params={"fen": pos.fen}, timeout=15)
+			resp.raise_for_status()
+			category = resp.json().get("category")
+
+			if pos.target == "checkmate":
+				return category in ("win", "maybe-win", "cursed-win")
+			if pos.target == "draw":
+				return category == "draw"
+			return False
+		except requests.RequestException as exc:
+			last_exc = exc
+			if attempt < TABLEBASE_MAX_ATTEMPTS:
+				delay = TABLEBASE_RETRY_BASE_SECONDS * (2 ** (attempt - 1))
+				print(
+					f"[endgame-import] retry {attempt}/{TABLEBASE_MAX_ATTEMPTS - 1} "
+					f"for {pos.fen} after {exc.__class__.__name__}, waiting {delay:.0f}s"
+				)
+				time.sleep(delay)
+
+	assert last_exc is not None
+	raise last_exc
 
 
 def import_positions(positions: list[EndgamePosition], verify: bool, dry_run: bool) -> None:
@@ -233,9 +259,18 @@ def main() -> None:
 		action="store_true",
 		help="Fetch, filter, and (optionally) verify, but do not write to the database"
 	)
+	parser.add_argument(
+		"--limit",
+		type=int,
+		default=None,
+		help="Only process the first N positions after piece-count filtering — for testing the database write path quickly before a full run"
+	)
 	args = parser.parse_args()
 
 	positions = fetch_source_positions()
+	if args.limit is not None:
+		positions = positions[: args.limit]
+		print(f"[endgame-import] --limit {args.limit}: processing only the first {len(positions)} positions")
 	import_positions(positions, verify=args.verify, dry_run=args.dry_run)
 
 
