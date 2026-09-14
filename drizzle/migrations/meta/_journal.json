@@ -211,6 +211,20 @@
 			"when": 1786752000000,
 			"tag": "0029_repertoire_hierarchy",
 			"breakpoints": true
+		},
+		{
+			"idx": 30,
+			"version": "6",
+			"when": 1786838400000,
+			"tag": "0030_trainer_eval_unreliable",
+			"breakpoints": true
+		},
+		{
+			"idx": 31,
+			"version": "6",
+			"when": 1786924800000,
+			"tag": "0031_endgame_module",
+			"breakpoints": true
 		}
 	]
 }

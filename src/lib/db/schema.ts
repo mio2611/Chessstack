@@ -566,6 +566,109 @@ export const trainerSavedPosition = pgTable(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ENDGAME TABLES
+// A training module independent of the opening repertoire DAG — no move-tree,
+// no transpositions. Each position carries a terminal objective (checkmate or
+// draw), not a stored "expected move": correctness during drill is validated
+// live against the Lichess tablebase API, not replayed against a fixed line.
+// Positions are sourced from supertorpe/chessendgametraining (GPL-3.0),
+// filtered at import to 7 pieces or fewer (Syzygy coverage limit).
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Shared book table — ships with the app as seed data, same pattern as
+// book_position. Never written to at runtime.
+export const endgamePosition = pgTable(
+	'endgame_position',
+	{
+		fen: text('fen').primaryKey(), // 4-field normalized FEN
+		category: text('category').notNull(), // e.g. "Basic", "Pawn", "Rook-Pieces"
+		subcategory: text('subcategory').notNull(), // e.g. "Queen", "Rook vs Pawn"
+		target: text('target').notNull(), // 'checkmate' | 'draw' — the objective, not a move
+		mateInHint: integer('mate_in_hint'), // informational only, from source; not enforced during drill
+		pieceCount: integer('piece_count').notNull(), // total pieces incl. kings; import filters this to <= 7
+		sourceAttribution: text('source_attribution').notNull()
+	},
+	(table) => ({
+		categoryIdx: index('idx_endgame_position_category').on(table.category, table.subcategory)
+	})
+);
+
+// Spaced repetition state for each endgame position the user is drilling.
+// Same field set/types as user_repertoire_move's FSRS columns — the FSRS
+// helpers in $lib/fsrs.ts already operate on a generic FSRSCardRow shape and
+// need no changes to work against this table.
+export const endgameCard = pgTable(
+	'endgame_card',
+	{
+		id: serial('id').primaryKey(),
+		userId: integer('user_id')
+			.notNull()
+			.references(() => user.id, { onDelete: 'cascade' }),
+		fen: text('fen')
+			.notNull()
+			.references(() => endgamePosition.fen, { onDelete: 'cascade' }),
+
+		due: timestamp('due'),
+		stability: doublePrecision('stability'),
+		difficulty: doublePrecision('difficulty'),
+		elapsedDays: integer('elapsed_days'),
+		scheduledDays: integer('scheduled_days'),
+		reps: integer('reps'),
+		lapses: integer('lapses'),
+		state: integer('state'), // 0=New, 1=Learning, 2=Review, 3=Relearning
+		lastReview: timestamp('last_review'),
+		learningSteps: integer('learning_steps').notNull().default(0)
+	},
+	(table) => ({
+		uniqueUserFen: unique().on(table.userId, table.fen),
+		dueIdx: index('idx_endgame_card_due').on(table.due),
+		userIdIdx: index('idx_endgame_card_user_id').on(table.userId)
+	})
+);
+
+// One row per FSRS grading event on an endgame card. Deliberately separate
+// from review_log rather than a shared table with a discriminant column:
+// review_log.card_id has a hard FK to user_repertoire_move(id) already in
+// production. Loosening that constraint for a second card domain would break
+// an existing invariant for no immediate benefit — a combined view can be
+// added later if a cross-domain FSRS optimizer ever needs one.
+export const endgameReviewLog = pgTable(
+	'endgame_review_log',
+	{
+		id: serial('id').primaryKey(),
+		userId: integer('user_id')
+			.notNull()
+			.references(() => user.id, { onDelete: 'cascade' }),
+		cardId: integer('card_id')
+			.notNull()
+			.references(() => endgameCard.id, { onDelete: 'cascade' }),
+
+		rating: integer('rating').notNull(), // 1=Again, 3=Good, 4=Easy
+		reviewedAt: timestamp('reviewed_at').notNull(),
+
+		stateBefore: integer('state_before').notNull(),
+		stabilityBefore: doublePrecision('stability_before'),
+		difficultyBefore: doublePrecision('difficulty_before'),
+		elapsedDaysBefore: integer('elapsed_days_before'),
+		scheduledDaysBefore: integer('scheduled_days_before'),
+		learningStepsBefore: integer('learning_steps_before').notNull(),
+
+		stateAfter: integer('state_after').notNull(),
+		stabilityAfter: doublePrecision('stability_after').notNull(),
+		difficultyAfter: doublePrecision('difficulty_after').notNull(),
+		elapsedDaysAfter: integer('elapsed_days_after').notNull(),
+		scheduledDaysAfter: integer('scheduled_days_after').notNull(),
+		learningStepsAfter: integer('learning_steps_after').notNull(),
+
+		requestRetention: doublePrecision('request_retention').notNull()
+	},
+	(table) => ({
+		userIdIdx: index('idx_endgame_review_log_user_id').on(table.userId),
+		cardIdIdx: index('idx_endgame_review_log_card_id').on(table.cardId)
+	})
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // OPPONENT PREP TABLES
 // Tournament preparation — download an opponent's games, analyze tendencies,
 // and build targeted responses in a sandboxed workspace separate from the
