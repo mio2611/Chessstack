@@ -47,3 +47,4 @@ scripts/puzzle-import.py
 # PGN & Zip Files used in Star player imports
 *.pgn
 *.zip
+__pycache__/
