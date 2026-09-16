@@ -31,6 +31,7 @@
 		playCorrect,
 		playIncorrect
 	} from '$lib/sounds';
+	import { toFullFen } from '$lib/fen';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -118,7 +119,7 @@
 			card = next.card;
 			position = next.position;
 			mode = next.mode;
-			currentFen = position!.fen;
+			currentFen = toFullFen(position!.fen);
 			orientation = currentFen.split(' ')[1] === 'w' ? 'white' : 'black';
 			lastMove = undefined;
 			resetAttemptState();
