@@ -337,16 +337,18 @@
 	<div class="board-col">
 		<ResizableBoard boardSize={data.settings?.boardSize ?? 0} onResize={handleBoardResize}>
 			<div class="board-wrap">
-				{#key boardKey}
-					<ChessBoard
-						fen={currentFen}
-						{orientation}
-						boardTheme={data.settings?.boardTheme ?? 'blue'}
-						interactive={phase === 'playing'}
-						{lastMove}
-						onMove={handleMove}
-					/>
-				{/key}
+				{#if currentFen}
+					{#key boardKey}
+						<ChessBoard
+							fen={currentFen}
+							{orientation}
+							boardTheme={data.settings?.boardTheme ?? 'blue'}
+							interactive={phase === 'playing'}
+							{lastMove}
+							onMove={handleMove}
+						/>
+					{/key}
+				{/if}
 				{#if flashColor}
 					<div
 						class="flash-overlay"
