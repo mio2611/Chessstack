@@ -645,6 +645,7 @@ export const endgameReviewLog = pgTable(
 
 		rating: integer('rating').notNull(), // 1=Again, 3=Good, 4=Easy
 		reviewedAt: timestamp('reviewed_at').notNull(),
+		source: text('source').notNull(), // "ENDGAME_PRACTICE" or "ENDGAME_THEORY"
 
 		stateBefore: integer('state_before').notNull(),
 		stabilityBefore: doublePrecision('stability_before'),
