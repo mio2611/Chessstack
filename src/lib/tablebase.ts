@@ -137,6 +137,11 @@ export interface MoveEvaluation {
 	positionDtz: number | null;
 	positionDtm: number | null;
 	move: TablebaseMove | null;
+	// The best sound move available at this position, regardless of which
+	// move was actually played — used by Theory mode to reveal the correct
+	// move after repeated failed attempts, so the drill can't stall forever
+	// on a move the user can't find.
+	bestMove: TablebaseMove | null;
 }
 
 /**
@@ -150,6 +155,14 @@ export async function evaluateMove(fen: string, uci: string): Promise<MoveEvalua
 	const position = await evaluatePosition(fen);
 	const move = position.moves.find((m) => m.uci === uci) ?? null;
 
+	const soundMoves = position.moves.filter((m) => categoryPreserved(position.category, m.category));
+	const bestMove =
+		soundMoves.length > 0
+			? soundMoves.reduce((best, m) =>
+					Math.abs(m.dtz ?? Infinity) < Math.abs(best.dtz ?? Infinity) ? m : best
+				)
+			: null;
+
 	if (!move) {
 		return {
 			found: false,
@@ -158,16 +171,13 @@ export async function evaluateMove(fen: string, uci: string): Promise<MoveEvalua
 			positionCategory: position.category,
 			positionDtz: position.dtz,
 			positionDtm: position.dtm,
-			move: null
+			move: null,
+			bestMove
 		};
 	}
 
 	const sound = categoryPreserved(position.category, move.category);
-
-	const soundMoves = position.moves.filter((m) => categoryPreserved(position.category, m.category));
-	const bestAbsDtz =
-		soundMoves.length > 0 ? Math.min(...soundMoves.map((m) => Math.abs(m.dtz ?? Infinity))) : Infinity;
-	const optimal = sound && Math.abs(move.dtz ?? Infinity) === bestAbsDtz;
+	const optimal = sound && bestMove !== null && Math.abs(move.dtz ?? Infinity) === Math.abs(bestMove.dtz ?? Infinity);
 
 	return {
 		found: true,
@@ -176,7 +186,8 @@ export async function evaluateMove(fen: string, uci: string): Promise<MoveEvalua
 		positionCategory: position.category,
 		positionDtz: position.dtz,
 		positionDtm: position.dtm,
-		move
+		move,
+		bestMove
 	};
 }
 
