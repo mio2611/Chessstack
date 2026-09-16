@@ -83,6 +83,7 @@
 	let maxAttemptsOnAnyMove = $state(0);
 	let drawPliesWithoutDegradation = $state(0);
 	const DRAW_PLY_THRESHOLD = 30;
+	const THEORY_MAX_RETRIES = 2; // 2 genuine retries, then reveal on the 3rd failure
 
 	const timers = new Set<ReturnType<typeof setTimeout>>();
 	function safeTimeout(fn: () => void, ms: number) {
@@ -197,6 +198,32 @@
 
 		if (mode === 'theory' && !evaluation.optimal) {
 			currentMoveAttempts++;
+
+			if (currentMoveAttempts > THEORY_MAX_RETRIES && evaluation.bestMove) {
+				// Stop asking the user to retry indefinitely — reveal the
+				// correct move and continue. maxAttemptsOnAnyMove already
+				// guarantees a Forgot rating at completion (see
+				// computeRating), this only fixes the stuck UX, not scoring.
+				playIncorrect();
+				feedback = `Le coup était ${evaluation.bestMove.san}. On continue.`;
+				flashColor = 'red';
+				safeTimeout(() => (flashColor = null), 600);
+
+				const revealChess = new Chess(beforeFen);
+				const revealMove = revealChess.move({
+					from: evaluation.bestMove.uci.slice(0, 2),
+					to: evaluation.bestMove.uci.slice(2, 4),
+					promotion: evaluation.bestMove.uci.slice(4) || undefined
+				});
+				await acceptMove(
+					revealChess,
+					evaluation.bestMove.uci.slice(0, 2),
+					evaluation.bestMove.uci.slice(2, 4),
+					Boolean(revealMove.captured)
+				);
+				return;
+			}
+
 			playIncorrect();
 			feedback = `Coup correct, mais pas le plus rapide vers le mat. Rejouez (essai ${currentMoveAttempts + 1}).`;
 			flashColor = 'red';
@@ -206,13 +233,20 @@
 			return;
 		}
 
-		// Move accepted.
+		feedback = '';
+		await acceptMove(chess, from, to, isCapture);
+	}
+
+	// Shared tail of handleMove: commit an accepted move (user-played or
+	// revealed) and continue the session. Does not touch `feedback` — the
+	// caller sets it (or clears it) before calling, since the reveal path
+	// needs its message to survive past this call.
+	async function acceptMove(chess: Chess, from: string, to: string, isCapture: boolean) {
 		maxAttemptsOnAnyMove = Math.max(maxAttemptsOnAnyMove, currentMoveAttempts);
 		currentMoveAttempts = 0;
 		totalPlies++;
-		currentFen = afterFen;
+		currentFen = chess.fen();
 		lastMove = [from, to];
-		feedback = '';
 		if (isCapture) playCapture();
 		else playMove();
 
@@ -220,7 +254,7 @@
 			await completeCard();
 			return;
 		}
-		if (position.target === 'draw') {
+		if (position?.target === 'draw') {
 			drawPliesWithoutDegradation++;
 			if (drawPliesWithoutDegradation >= DRAW_PLY_THRESHOLD) {
 				await completeCard();
