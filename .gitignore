@@ -41,6 +41,10 @@ lichess_db_puzzle.csv
 # Data dump files (distributed via GitHub Releases, not committed)
 *.sql.gz
 
+# Stockfish client engine assets — copied from node_modules/stockfish/bin
+# by scripts/copy-engine-assets.js (see the "prebuild" script), not committed
+/static/engine/
+
 # Import scripts — not shipped; users restore from pg_dump instead
 scripts/puzzle-import.py
 

@@ -6,6 +6,7 @@
 	"type": "module",
 	"scripts": {
 		"dev": "vite dev",
+		"prebuild": "node copy-engine-assets.mjs",
 		"build": "vite build",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",
@@ -46,6 +47,7 @@
 		"chess.js": "^1.4.0",
 		"drizzle-orm": "^0.45.1",
 		"postgres": "^3.4.9",
+		"stockfish": "19.0.0",
 		"ts-fsrs": "^5.2.3"
 	},
 	"overrides": {
