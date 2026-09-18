@@ -35,6 +35,7 @@
 	import type { Key } from '@lichess-org/chessground/types';
 	import { Chess } from 'chess.js';
 	import { STARTING_FEN, fenKey } from '$lib/fen';
+	import { evaluatePosition } from '$lib/client/stockfish';
 
 	let { data, form }: { data: PageData; form: Record<string, unknown> | null } = $props();
 
@@ -317,7 +318,12 @@
 	// index 0 = starting position, index N = position after ply N.
 	let positionEvals = new SvelteMap<number, { evalCp: number | null; evalMate: number | null }>();
 	let evalProgress = $state<{ done: number; total: number } | null>(null);
-	let evalAbortController = $state<AbortController | null>(null);
+	// Bumped whenever the current analysis is superseded (new game loaded, or
+	// "← New game"). The client analysis loop checks this after every awaited
+	// engine call and stops issuing new positions once it no longer matches —
+	// the one position already in flight still finishes (no server fetch to
+	// abort anymore), but no stale backlog builds up behind it.
+	let evalRunId = 0;
 
 	// ── Hover arrow state (for ReviewIssuePicker → board arrow) ─────────────────
 
@@ -425,8 +431,7 @@
 				deviationMastersError.clear();
 				deviationMastersExpanded.clear();
 				positionEvals.clear();
-				evalAbortController?.abort();
-				evalAbortController = null;
+				evalRunId++;
 				evalProgress = null;
 				hoveredFen = null;
 				hoveredSan = null;
@@ -440,13 +445,12 @@
 				loaded.issues.length > 0 ? loaded.issues[0].ply : loaded.fenHistory.length - 1;
 			untrack(() => startAutoPlay(targetPly));
 
-			// Fetch evals for DEVIATION issues in the background (fire and forget).
-			for (const issue of loaded.issues) {
-				if (issue.type === 'DEVIATION') fetchDeviationEvals(issue);
-			}
-
-			// Kick off full-game engine evaluation for CPL classification.
-			untrack(() => startBatchEval(loaded));
+			// Engine analysis (full-game CPL + deviation evals) is no longer automatic —
+			// see the "Analyser cette partie" button, which calls runClientAnalysis().
+			// Running Stockfish client-side at depth 20 with no time cap (a position can
+			// legitimately take 30s+) means auto-starting on every game load would turn
+			// simply opening a game into a multi-minute background compute session the
+			// user never asked for.
 		}
 	});
 
@@ -645,14 +649,16 @@
 		return shapes;
 	});
 
-	// Fetch Stockfish evals for a DEVIATION issue (wrong move and correct alternative).
-	// Both positions are evaluated in parallel and results stored in deviationEvals.
-	// evalCp is always from White's perspective (positive = White better).
+	// Compute evals for a DEVIATION issue (wrong move vs. the correct repertoire
+	// alternative). "played" reuses the full-game batch's eval for issue.toFen
+	// (already computed, since toFen is always an entry of fenHistory — same
+	// ply, same position) rather than asking the engine to redo it. Only
+	// "correct" — the hypothetical position after the repertoire move, never
+	// actually reached in the game — needs a fresh engine call.
 	async function fetchDeviationEvals(issue: GameIssue): Promise<void> {
 		if (deviationFetching.has(issue.ply)) return;
 		deviationFetching.add(issue.ply);
 		try {
-			// Compute the FEN after the correct repertoire move.
 			let correctToFen: string | null = null;
 			if (issue.repertoireSan) {
 				try {
@@ -664,25 +670,23 @@
 				}
 			}
 
-			const evalPos = async (fen: string): Promise<number | null> => {
-				try {
-					const res = await fetch('/api/stockfish', {
-						method: 'POST',
-						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify({ fen, numMoves: 1 })
-					});
-					if (!res.ok) return null;
-					const data = (await res.json()) as { candidates?: { evalCp: number | null }[] };
-					return data.candidates?.[0]?.evalCp ?? null;
-				} catch {
-					return null;
-				}
-			};
+			const playedEval = evalToWhiteCp(
+				positionEvals.get(issue.ply) ?? { evalCp: null, evalMate: null }
+			);
 
-			const [playedEval, correctEval] = await Promise.all([
-				evalPos(issue.toFen),
-				correctToFen ? evalPos(correctToFen) : Promise.resolve(null)
-			]);
+			let correctEval: number | null = null;
+			if (correctToFen) {
+				try {
+					const result = await evaluatePosition(correctToFen);
+					const whiteMultiplier = correctToFen.split(' ')[1] === 'w' ? 1 : -1;
+					correctEval = evalToWhiteCp({
+						evalCp: result.evalCp != null ? result.evalCp * whiteMultiplier : null,
+						evalMate: result.evalMate != null ? result.evalMate * whiteMultiplier : null
+					});
+				} catch {
+					/* ignore — watchdog timeout or similar, leave correctEval null */
+				}
+			}
 
 			deviationEvals.set(issue.ply, { played: playedEval, correct: correctEval });
 		} finally {
@@ -764,69 +768,50 @@
 		return '';
 	}
 
-	// Kick off background evaluation of all positions in the game. Results
-	// stream in via NDJSON and progressively update positionEvals / colors.
-	async function startBatchEval(gameAnalysis: GameAnalysis): Promise<void> {
-		// Abort any in-flight evaluation from a previous analysis.
-		evalAbortController?.abort();
-
-		const controller = new AbortController();
-		evalAbortController = controller;
-
+	// Runs the full client-side analysis for a game: every position in
+	// fenHistory at TARGET_DEPTH (20, no time cap — see $lib/client/stockfish),
+	// one at a time, followed by the DEVIATION issue's "correct move" eval.
+	// Triggered only by the "Analyser cette partie" button, never automatically —
+	// see the comment where the old auto-trigger used to sit, above.
+	//
+	// evalRunId guards against a stale run still appending results after the
+	// user has moved on to a different game: checked after every awaited
+	// engine call, so at most one already-in-flight position is "wasted",
+	// never a whole backlog.
+	async function runClientAnalysis(gameAnalysis: GameAnalysis): Promise<void> {
+		const myRunId = ++evalRunId;
 		const fens = gameAnalysis.fenHistory;
 		evalProgress = { done: 0, total: fens.length };
 
-		try {
-			const res = await fetch('/api/stockfish/batch', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ fens }),
-				signal: controller.signal
-			});
-			if (!res.ok || !res.body) {
-				evalProgress = null;
-				return;
+		for (let i = 0; i < fens.length; i++) {
+			if (myRunId !== evalRunId) return;
+
+			const fen = fens[i];
+			try {
+				const result = await evaluatePosition(fen);
+				if (myRunId !== evalRunId) return;
+				const whiteMultiplier = fen.split(' ')[1] === 'w' ? 1 : -1;
+				positionEvals.set(i, {
+					evalCp: result.evalCp != null ? result.evalCp * whiteMultiplier : null,
+					evalMate: result.evalMate != null ? result.evalMate * whiteMultiplier : null
+				});
+			} catch {
+				// Watchdog timeout or similar — leave this position unevaluated
+				// (no coloring for that move) and carry on with the rest of the game.
 			}
 
-			const reader = res.body.getReader();
-			const decoder = new TextDecoder();
-			let buffer = '';
+			evalProgress = { done: i + 1, total: fens.length };
+		}
 
-			while (true) {
-				const { done, value } = await reader.read();
-				if (done) break;
+		if (myRunId !== evalRunId) return;
+		evalProgress = null;
 
-				buffer += decoder.decode(value, { stream: true });
-				const lines = buffer.split('\n');
-				buffer = lines.pop() ?? '';
-
-				for (const line of lines) {
-					if (!line.trim()) continue;
-					try {
-						const parsed = JSON.parse(line) as
-							| { done: true }
-							| { index: number; evalCp: number | null; evalMate: number | null };
-						if ('done' in parsed && parsed.done === true) continue;
-						if ('index' in parsed) {
-							positionEvals.set(parsed.index, {
-								evalCp: parsed.evalCp,
-								evalMate: parsed.evalMate
-							});
-							evalProgress = {
-								done: parsed.index + 1,
-								total: fens.length
-							};
-						}
-					} catch {
-						// Malformed line — skip it.
-					}
-				}
-			}
-		} catch (err: unknown) {
-			// AbortError is expected when the user navigates away mid-eval.
-			if (err instanceof DOMException && err.name === 'AbortError') return;
-		} finally {
-			evalProgress = null;
+		// DEVIATION issue evals (at most one per game — analyzeGame stops at the
+		// first deviation): reuses the batch result above for "played" via
+		// fetchDeviationEvals, only the "correct" alternative needs a fresh call.
+		for (const issue of gameAnalysis.issues) {
+			if (myRunId !== evalRunId) return;
+			if (issue.type === 'DEVIATION') await fetchDeviationEvals(issue);
 		}
 	}
 
@@ -1255,8 +1240,7 @@
 
 	// Go back to the input state to review another game.
 	function reviewAnother(): void {
-		evalAbortController?.abort();
-		evalAbortController = null;
+		evalRunId++;
 		evalProgress = null;
 		positionEvals.clear();
 		analysis = null;
@@ -1633,6 +1617,10 @@
 					<span class="eval-progress-text">Evaluating {evalProgress.done}/{evalProgress.total}</span
 					>
 				</div>
+			{:else}
+				<button class="nav-btn analyze-btn" onclick={() => runClientAnalysis(analysis!)}>
+					▶ Analyser cette partie
+				</button>
 			{/if}
 
 			<!-- Navigation controls -->
