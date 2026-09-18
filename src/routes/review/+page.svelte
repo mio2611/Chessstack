@@ -173,7 +173,11 @@
 			const result = await res.json();
 
 			if (result.analyses.length === 0) {
+				// No matching repertoire — deviation analysis won't be available,
+				// but the game still loads: fenHistory (and so the Anti-gaffe tab)
+				// doesn't depend on a repertoire at all.
 				importError = result.message ?? 'No matching repertoires found for this game.';
+				loadImportedGameForReview(gameId, result.game.pgn, result.game.playerColor, null);
 				return;
 			}
 
@@ -201,7 +205,7 @@
 		gameId: number,
 		pgn: string,
 		color: string,
-		repertoireId: number
+		repertoireId: number | null
 	) {
 		showRepPicker = false;
 		importedGameId = gameId;
@@ -1480,6 +1484,13 @@
 										</button>
 									{:else if game.status === 'reviewed'}
 										<span class="import-badge import-badge--reviewed">Reviewed</span>
+										<button
+											class="btn btn--sm btn--ghost"
+											onclick={() => startReviewImportedGame(game.id)}
+											disabled={repPickerLoading && repPickerGameId === game.id}
+										>
+											{repPickerLoading && repPickerGameId === game.id ? 'Loading…' : 'Re-open'}
+										</button>
 									{:else}
 										<span class="import-badge import-badge--skipped">Skipped</span>
 										<button
@@ -1692,14 +1703,22 @@
 
 			<!-- Issues section -->
 			<div class="section-label">
-				{#if analysis.issues.length === 0}
+				{#if overrideRepertoireId === null || analysis.issues.length === 0}
 					ANALYSIS
 				{:else}
 					ISSUES ({analysis.issues.length})
 				{/if}
 			</div>
 
-			{#if analysis.issues.length === 0}
+			{#if overrideRepertoireId === null}
+				<div class="no-issues">
+					<p class="no-issues-title">No matching repertoire</p>
+					<p class="no-issues-hint">
+						This game's opening doesn't match any of your repertoires, so deviation analysis
+						isn't available for it. The Anti-gaffe tab works independently of this.
+					</p>
+				</div>
+			{:else if analysis.issues.length === 0}
 				<div class="no-issues">
 					<div class="no-issues-icon">✓</div>
 					<p class="no-issues-title">No deviations found!</p>
@@ -2076,18 +2095,21 @@
 				</div>
 			{/if}
 
-			<!-- Notes + save -->
-			<div class="save-section">
-				<textarea
-					class="notes-input"
-					rows="3"
-					placeholder="Notes about this game…"
-					bind:value={notes}
-				></textarea>
-				<button class="btn btn--primary btn--full" onclick={saveReview} disabled={saving}>
+			<!-- Notes + save — meaningless without a repertoire, since there is
+			     nothing to save a deviation review against. -->
+			{#if overrideRepertoireId !== null}
+				<div class="save-section">
+					<textarea
+						class="notes-input"
+						rows="3"
+						placeholder="Notes about this game…"
+						bind:value={notes}
+					></textarea>
+					<button class="btn btn--primary btn--full" onclick={saveReview} disabled={saving}>
 					{saving ? 'Saving…' : 'Save Review'}
 				</button>
 			</div>
+			{/if}
 		</div>
 	</div>
 
