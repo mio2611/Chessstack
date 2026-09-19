@@ -349,6 +349,12 @@
 
 	let saving = $state(false);
 	let savedId = $state<number | null>(null);
+	// Set when the anti-gaffe scan (not "Save Review") creates a minimal
+	// reviewed_game row for a pasted game with no imported_game_id yet.
+	// Deliberately separate from savedId, which drives pageState's "saved"
+	// screen — reusing savedId here would silently flip the whole page to
+	// the save-confirmation view just from clicking "Scanner cette partie".
+	let antiGaffeGameId = $state<number | null>(null);
 
 	onMount(() => {
 		initSounds();
@@ -421,6 +427,7 @@
 			currentPlyIdx = 0;
 			notes = '';
 			savedId = null;
+			antiGaffeGameId = null;
 			analysisError = null;
 			untrack(() => {
 				resolvedIssues.clear();
@@ -1208,6 +1215,44 @@
 	}
 
 	// Save the reviewed game record to the database.
+	// Resolves a (gameSource, gameId) pair the anti-gaffe scan can attach
+	// candidates to. Returns whatever already exists (imported game, an
+	// already-saved deviation review, or a reviewed_game row anti-gaffe
+	// itself created earlier this session) without creating anything new.
+	// Only when a pasted game has none of those does it create a minimal
+	// reviewed_game row via /api/anti-gaffe/ensure-reviewed-game — never
+	// through /api/review/save, whose semantics are specifically about
+	// saving a deviation review (repertoire required, updates
+	// imported_game.status), not "does this game exist as a row".
+	//
+	// Known limitation: if the user scans first and separately clicks
+	// "Save Review" later for the same pasted game, that creates a second,
+	// separate reviewed_game row rather than reusing this one — harmless
+	// (both correctly belong to the user) but not merged.
+	async function ensureReviewedGameId(): Promise<{
+		gameSource: 'imported' | 'reviewed';
+		gameId: number;
+	} | null> {
+		if (importedGameId !== null) return { gameSource: 'imported', gameId: importedGameId };
+		if (antiGaffeGameId !== null) return { gameSource: 'reviewed', gameId: antiGaffeGameId };
+		if (savedId !== null) return { gameSource: 'reviewed', gameId: savedId };
+		if (!parsedPgn) return null;
+
+		try {
+			const res = await fetch('/api/anti-gaffe/ensure-reviewed-game', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ pgn: parsedPgn, repertoireId: overrideRepertoireId })
+			});
+			if (!res.ok) return null;
+			const data = (await res.json()) as { id: number };
+			antiGaffeGameId = data.id;
+			return { gameSource: 'reviewed', gameId: data.id };
+		} catch {
+			return null;
+		}
+	}
+
 	async function saveReview(): Promise<void> {
 		if (!parsedPgn || !analysis || saving) return;
 		saving = true;
@@ -1242,6 +1287,7 @@
 		analysis = null;
 		parsedPgn = null;
 		savedId = null;
+		antiGaffeGameId = null;
 		pgnText = '';
 		analysisError = null;
 		importedGameId = null;

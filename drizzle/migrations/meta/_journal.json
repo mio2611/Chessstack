@@ -239,6 +239,13 @@
 			"when": 1787097600000,
 			"tag": "0033_anti_gaffe_module",
 			"breakpoints": true
+		},
+		{
+			"idx": 34,
+			"version": "6",
+			"when": 1787184000000,
+			"tag": "0034_reviewed_game_optional_repertoire",
+			"breakpoints": true
 		}
 	]
 }

@@ -417,9 +417,7 @@ export const reviewedGame = pgTable(
 		userId: integer('user_id')
 			.notNull()
 			.references(() => user.id, { onDelete: 'cascade' }),
-		repertoireId: integer('repertoire_id')
-			.notNull()
-			.references(() => repertoire.id, { onDelete: 'cascade' }),
+		repertoireId: integer('repertoire_id').references(() => repertoire.id, { onDelete: 'cascade' }), // nullable — a pasted game with no matching repertoire can still be saved (see migration 0034)
 		pgn: text('pgn').notNull(), // full PGN of the reviewed game
 		source: text('source').notNull(), // "MANUAL" (pasted) or "LICHESS" (imported)
 		lichessGameId: text('lichess_game_id'), // Lichess game ID, used to prevent duplicate imports
