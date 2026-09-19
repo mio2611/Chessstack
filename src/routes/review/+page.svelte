@@ -36,6 +36,7 @@
 	import { Chess } from 'chess.js';
 	import { STARTING_FEN, fenKey } from '$lib/fen';
 	import { evaluatePosition } from '$lib/client/stockfish';
+	import { evaluateGame } from '$lib/client/gameEval';
 
 	let { data, form }: { data: PageData; form: Record<string, unknown> | null } = $props();
 
@@ -784,28 +785,19 @@
 	// never a whole backlog.
 	async function runClientAnalysis(gameAnalysis: GameAnalysis): Promise<void> {
 		const myRunId = ++evalRunId;
-		const fens = gameAnalysis.fenHistory;
-		evalProgress = { done: 0, total: fens.length };
+		evalProgress = { done: 0, total: gameAnalysis.fenHistory.length };
 
-		for (let i = 0; i < fens.length; i++) {
-			if (myRunId !== evalRunId) return;
-
-			const fen = fens[i];
-			try {
-				const result = await evaluatePosition(fen);
-				if (myRunId !== evalRunId) return;
-				const whiteMultiplier = fen.split(' ')[1] === 'w' ? 1 : -1;
-				positionEvals.set(i, {
-					evalCp: result.evalCp != null ? result.evalCp * whiteMultiplier : null,
-					evalMate: result.evalMate != null ? result.evalMate * whiteMultiplier : null
-				});
-			} catch {
-				// Watchdog timeout or similar — leave this position unevaluated
-				// (no coloring for that move) and carry on with the rest of the game.
+		await evaluateGame(gameAnalysis.fenHistory, {
+			isCancelled: () => myRunId !== evalRunId,
+			onProgress: (p) => {
+				evalProgress = p;
+			},
+			onResult: (ply, _fen, result) => {
+				if (result) {
+					positionEvals.set(ply, { evalCp: result.evalCp, evalMate: result.evalMate });
+				}
 			}
-
-			evalProgress = { done: i + 1, total: fens.length };
-		}
+		});
 
 		if (myRunId !== evalRunId) return;
 		evalProgress = null;
