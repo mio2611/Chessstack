@@ -232,6 +232,13 @@
 			"when": 1787011200000,
 			"tag": "0032_endgame_review_log_source",
 			"breakpoints": true
+		},
+		{
+			"idx": 33,
+			"version": "6",
+			"when": 1787097600000,
+			"tag": "0033_anti_gaffe_module",
+			"breakpoints": true
 		}
 	]
 }
