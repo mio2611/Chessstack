@@ -3401,8 +3401,8 @@
 	/* Anti-gaffe candidate cards — same treatment as the deviation issue
 	   types above, own colour since it's a different kind of issue. */
 	.issue-anti-gaffe {
-		border-color: rgba(155, 109, 216, 0.4);
-		background: rgba(155, 109, 216, 0.05);
+		border-color: var(--color-anti-gaffe);
+		background: var(--color-anti-gaffe-bg);
 	}
 
 	/* Resolved issues are dimmed */
