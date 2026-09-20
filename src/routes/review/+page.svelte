@@ -3136,7 +3136,7 @@
 	}
 
 	.tab-btn--active {
-		color: var(--color-text);
+		color: var(--color-text-primary);
 		border-bottom-color: var(--color-accent);
 	}
 
@@ -3188,7 +3188,7 @@
 
 	.multipv-line-btn:hover {
 		background: var(--color-surface);
-		color: var(--color-text);
+		color: var(--color-text-primary);
 	}
 
 	.eval-progress {
