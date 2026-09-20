@@ -37,6 +37,7 @@
 	import { STARTING_FEN, fenKey } from '$lib/fen';
 	import { evaluatePosition } from '$lib/client/stockfish';
 	import { evaluateGame } from '$lib/client/gameEval';
+	import { scanGameForAntiGaffe } from '$lib/client/antiGaffeScan';
 
 	let { data, form }: { data: PageData; form: Record<string, unknown> | null } = $props();
 
@@ -318,6 +319,37 @@
 	let deviationMastersError = new SvelteMap<number, boolean>();
 	let deviationMastersExpanded = new SvelteSet<number>();
 
+	// ── Anti-gaffe tab ───────────────────────────────────────────────────────
+	// Independent of everything above: its own tab, its own scan trigger, its
+	// own run-id (so starting a scan never cancels an in-progress deviation
+	// analysis, or vice versa — both just queue on the same underlying
+	// client Stockfish worker, see $lib/client/stockfish).
+
+	interface AntiGaffeCandidate {
+		id: number;
+		ply: number;
+		fen: string;
+		playedSan: string;
+		evalBeforeCp: number;
+		evalAfterCp: number;
+		cpLoss: number;
+		bestMoveUci: string | null;
+		bestMoveSan: string | null;
+		status: 'pending' | 'accepted' | 'rejected';
+		confirmedMoveSan: string | null;
+		cardId: number | null;
+	}
+
+	let activeTab = $state<'deviation' | 'anti-gaffe'>('deviation');
+	let antiGaffeCandidates = $state<AntiGaffeCandidate[]>([]);
+	let antiGaffeScanProgress = $state<{ done: number; total: number } | null>(null);
+	let antiGaffeScanRunId = 0;
+	let antiGaffeActionLoading = new SvelteMap<number, boolean>();
+	// candidateId → the existing card's move, when accept returned a 409.
+	let antiGaffeConflicts = new SvelteMap<number, string>();
+	// candidateId → editable confirmed-move input, seeded from bestMoveSan.
+	let antiGaffeMoveInputs = new SvelteMap<number, string>();
+
 	// ── Full-game engine evaluation (CPL classification) ────────────────────────
 	// positionEvals maps position index → engine eval from white's perspective.
 	// index 0 = starting position, index N = position after ply N.
@@ -428,6 +460,10 @@
 			notes = '';
 			savedId = null;
 			antiGaffeGameId = null;
+			antiGaffeCandidates = [];
+			antiGaffeMoveInputs.clear();
+			antiGaffeConflicts.clear();
+			activeTab = 'deviation';
 			analysisError = null;
 			untrack(() => {
 				resolvedIssues.clear();
@@ -1253,6 +1289,116 @@
 		}
 	}
 
+	// Read-only: returns the current game's (gameSource, gameId) if one
+	// already exists, without creating anything. Used to load the
+	// candidates list when switching to the Anti-gaffe tab — merely
+	// looking at the tab must never create a reviewed_game row.
+	function currentGameRef(): { gameSource: 'imported' | 'reviewed'; gameId: number } | null {
+		if (importedGameId !== null) return { gameSource: 'imported', gameId: importedGameId };
+		if (antiGaffeGameId !== null) return { gameSource: 'reviewed', gameId: antiGaffeGameId };
+		if (savedId !== null) return { gameSource: 'reviewed', gameId: savedId };
+		return null;
+	}
+
+	async function loadAntiGaffeCandidates(): Promise<void> {
+		const ref = currentGameRef();
+		if (!ref) {
+			antiGaffeCandidates = [];
+			return;
+		}
+		try {
+			const res = await fetch(
+				`/api/anti-gaffe/candidates?gameSource=${ref.gameSource}&gameId=${ref.gameId}`
+			);
+			if (!res.ok) return;
+			const data = (await res.json()) as AntiGaffeCandidate[];
+			antiGaffeCandidates = data;
+			for (const c of data) {
+				if (c.status === 'pending' && !antiGaffeMoveInputs.has(c.id)) {
+					antiGaffeMoveInputs.set(c.id, c.bestMoveSan ?? '');
+				}
+			}
+		} catch {
+			/* leave whatever list was already showing */
+		}
+	}
+
+	// Triggered only by the "Scanner cette partie" button — never
+	// automatically, same reasoning as the deviation tab's "Analyser cette
+	// partie". Its own run-id, independent of evalRunId, so this and a
+	// deviation analysis never cancel each other (they just queue on the
+	// same underlying client Stockfish worker).
+	async function runAntiGaffeScan(): Promise<void> {
+		if (!analysis) return;
+		const myRunId = ++antiGaffeScanRunId;
+
+		const ref = await ensureReviewedGameId();
+		if (!ref || myRunId !== antiGaffeScanRunId) return;
+
+		antiGaffeScanProgress = { done: 0, total: analysis.fenHistory.length };
+
+		await scanGameForAntiGaffe({
+			gameSource: ref.gameSource,
+			gameId: ref.gameId,
+			fenHistory: analysis.fenHistory,
+			sanHistory: analysis.sanHistory,
+			playerColor: analysedPlayerColor,
+			isCancelled: () => myRunId !== antiGaffeScanRunId,
+			onProgress: (p) => {
+				antiGaffeScanProgress = p;
+			},
+			onCandidateFound: () => {
+				// Refresh live as candidates are found rather than waiting for
+				// the whole scan (which can run for many minutes) to finish.
+				loadAntiGaffeCandidates();
+			}
+		});
+
+		if (myRunId !== antiGaffeScanRunId) return;
+		antiGaffeScanProgress = null;
+		await loadAntiGaffeCandidates();
+	}
+
+	async function acceptAntiGaffeCandidate(
+		candidate: AntiGaffeCandidate,
+		forceReplace = false
+	): Promise<void> {
+		const confirmedMoveSan = (antiGaffeMoveInputs.get(candidate.id) ?? '').trim();
+		if (!confirmedMoveSan) return;
+
+		antiGaffeActionLoading.set(candidate.id, true);
+		try {
+			const res = await fetch(`/api/anti-gaffe/candidates/${candidate.id}/accept`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ confirmedMoveSan, forceReplace })
+			});
+			if (res.status === 409) {
+				const data = (await res.json()) as { existing: { confirmedMoveSan: string } };
+				antiGaffeConflicts.set(candidate.id, data.existing.confirmedMoveSan);
+				return;
+			}
+			if (!res.ok) return;
+			antiGaffeConflicts.delete(candidate.id);
+			await loadAntiGaffeCandidates();
+		} finally {
+			antiGaffeActionLoading.set(candidate.id, false);
+		}
+	}
+
+	async function rejectAntiGaffeCandidate(candidateId: number): Promise<void> {
+		antiGaffeActionLoading.set(candidateId, true);
+		try {
+			const res = await fetch(`/api/anti-gaffe/candidates/${candidateId}/reject`, {
+				method: 'POST'
+			});
+			if (!res.ok) return;
+			await loadAntiGaffeCandidates();
+		} finally {
+			antiGaffeActionLoading.set(candidateId, false);
+		}
+	}
+
 	async function saveReview(): Promise<void> {
 		if (!parsedPgn || !analysis || saving) return;
 		saving = true;
@@ -1288,6 +1434,10 @@
 		parsedPgn = null;
 		savedId = null;
 		antiGaffeGameId = null;
+		antiGaffeCandidates = [];
+		antiGaffeMoveInputs.clear();
+		antiGaffeConflicts.clear();
+		activeTab = 'deviation';
 		pgnText = '';
 		analysisError = null;
 		importedGameId = null;
@@ -1739,8 +1889,33 @@
 				</div>
 			{/if}
 
-			<!-- Issues section -->
-			<div class="section-label">
+			<!-- Tab switcher: Deviation / Anti-gaffe are fully independent, each
+			     with its own trigger — see the design notes throughout this
+			     file for why (mainly: deviation needs a repertoire, anti-gaffe
+			     never does, and the two must never block each other). -->
+			<div class="tab-switcher">
+				<button
+					class="tab-btn"
+					class:tab-btn--active={activeTab === 'deviation'}
+					onclick={() => (activeTab = 'deviation')}
+				>
+					Deviation
+				</button>
+				<button
+					class="tab-btn"
+					class:tab-btn--active={activeTab === 'anti-gaffe'}
+					onclick={() => {
+						activeTab = 'anti-gaffe';
+						loadAntiGaffeCandidates();
+					}}
+				>
+					Anti-gaffe
+				</button>
+			</div>
+
+			{#if activeTab === 'deviation'}
+				<!-- Issues section -->
+				<div class="section-label">
 				{#if overrideRepertoireId === null || analysis.issues.length === 0}
 					ANALYSIS
 				{:else}
@@ -2148,6 +2323,91 @@
 				</button>
 			</div>
 			{/if}
+		{:else}
+			<!-- Anti-gaffe panel: fully independent of the Deviation panel
+			     above — its own trigger, its own state, no repertoire
+			     involved anywhere in this branch. -->
+			{#if antiGaffeScanProgress}
+				<div class="eval-progress">
+					<div
+						class="eval-progress-bar"
+						style="width: {(antiGaffeScanProgress.done / antiGaffeScanProgress.total) * 100}%"
+					></div>
+					<span class="eval-progress-text"
+						>Scanning {antiGaffeScanProgress.done}/{antiGaffeScanProgress.total}</span
+					>
+				</div>
+			{:else}
+				<button class="nav-btn analyze-btn" onclick={runAntiGaffeScan}>
+					▶ Scanner cette partie
+				</button>
+			{/if}
+
+			{#if antiGaffeCandidates.length === 0}
+				<div class="no-issues">
+					<p class="no-issues-title">No candidates yet</p>
+					<p class="no-issues-hint">
+						Run the scan to look for your own moves that lost 100cp or more.
+					</p>
+				</div>
+			{:else}
+				<div class="issues-list">
+					{#each antiGaffeCandidates as candidate (candidate.id)}
+						<div class="issue-item">
+							<div class="issue-header">
+								Ply {candidate.ply + 1} · {candidate.playedSan} · -{candidate.cpLoss}cp
+							</div>
+							{#if candidate.status === 'pending'}
+								<label class="candidate-move-label">
+									Move to play:
+									<input
+										type="text"
+										class="notes-input"
+										bind:value={
+											() => antiGaffeMoveInputs.get(candidate.id) ?? '',
+											(v) => antiGaffeMoveInputs.set(candidate.id, v)
+										}
+									/>
+								</label>
+								{#if antiGaffeConflicts.has(candidate.id)}
+									<div class="action-error">
+										A card for this position already expects {antiGaffeConflicts.get(
+											candidate.id
+										)}.
+										<button
+											class="btn btn--sm"
+											onclick={() => acceptAntiGaffeCandidate(candidate, true)}
+											disabled={antiGaffeActionLoading.get(candidate.id)}
+										>
+											Replace it
+										</button>
+									</div>
+								{:else}
+									<div class="issue-actions">
+										<button
+											class="btn btn--sm btn--primary"
+											onclick={() => acceptAntiGaffeCandidate(candidate)}
+											disabled={antiGaffeActionLoading.get(candidate.id)}
+										>
+											Accept
+										</button>
+										<button
+											class="btn btn--sm btn--ghost"
+											onclick={() => rejectAntiGaffeCandidate(candidate.id)}
+											disabled={antiGaffeActionLoading.get(candidate.id)}
+										>
+											Reject
+										</button>
+									</div>
+								{/if}
+							{:else}
+								<div class="issue-status">{candidate.status}</div>
+							{/if}
+						</div>
+					{/each}
+				</div>
+			{/if}
+		{/if}
 		</div>
 	</div>
 
@@ -2750,6 +3010,28 @@
 		margin-left: 1px;
 		vertical-align: super;
 		font-weight: 400;
+	}
+
+	.tab-switcher {
+		display: flex;
+		gap: var(--space-1);
+		margin-bottom: var(--space-2);
+		border-bottom: 1px solid var(--color-border);
+	}
+
+	.tab-btn {
+		padding: var(--space-1) var(--space-2);
+		background: none;
+		border: none;
+		border-bottom: 2px solid transparent;
+		color: var(--color-text-muted);
+		cursor: pointer;
+		font-size: inherit;
+	}
+
+	.tab-btn--active {
+		color: var(--color-text);
+		border-bottom-color: var(--color-accent);
 	}
 
 	.eval-progress {
