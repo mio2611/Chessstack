@@ -2431,7 +2431,10 @@
 			{:else}
 				<div class="issues-list">
 					{#each antiGaffeCandidates as candidate (candidate.id)}
-						<div class="issue-card" class:issue-active={currentPlyIdx === candidate.ply}>
+						<div
+						class="issue-card issue-anti-gaffe"
+						class:issue-active={currentPlyIdx === candidate.ply}
+					>
 							<button class="issue-header" onclick={() => jumpToAntiGaffeCandidate(candidate)}>
 								Ply {candidate.ply + 1} · {candidate.playedSan} · -{candidate.cpLoss}cp
 							</button>
@@ -3374,6 +3377,13 @@
 	.issue-surprise {
 		border-color: rgba(220, 96, 96, 0.4);
 		background: rgba(220, 96, 96, 0.05);
+	}
+
+	/* Anti-gaffe candidate cards — same treatment as the deviation issue
+	   types above, own colour since it's a different kind of issue. */
+	.issue-anti-gaffe {
+		border-color: rgba(155, 109, 216, 0.4);
+		background: rgba(155, 109, 216, 0.05);
 	}
 
 	/* Resolved issues are dimmed */
