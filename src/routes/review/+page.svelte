@@ -3143,15 +3143,34 @@
 	.multipv-loading {
 		font-size: 0.85em;
 		color: var(--color-text-muted);
-		padding: var(--space-1) 0;
+		padding: var(--space-1) var(--space-3);
 	}
 
 	.multipv-lines {
 		list-style: none;
 		margin: 0;
-		padding: var(--space-1) 0;
+		padding: var(--space-1) var(--space-3);
 		font-size: 0.85em;
 		color: var(--color-text-muted);
+	}
+
+	.candidate-move-label {
+		display: block;
+		padding: var(--space-1) var(--space-3) var(--space-2);
+		font-size: 0.85em;
+		color: var(--color-text-muted);
+	}
+
+	.candidate-move-label .notes-input {
+		display: block;
+		margin-top: var(--space-1);
+	}
+
+	.issue-status {
+		padding: 0 var(--space-3) var(--space-3);
+		font-size: 0.85em;
+		color: var(--color-text-muted);
+		text-transform: capitalize;
 	}
 
 	.multipv-line-btn {
