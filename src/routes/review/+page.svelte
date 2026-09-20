@@ -355,6 +355,12 @@
 	let antiGaffeMultiPvCandidateId = $state<number | null>(null);
 	let antiGaffeMultiPvLines = $state<MultiPvLine[] | null>(null);
 	let antiGaffeMultiPvLoading = $state(false);
+	// candidateId → its MultiPv lines, once computed — re-clicking the same
+	// candidate reuses this instead of re-running the (slow) engine search.
+	let antiGaffeMultiPvCache = new SvelteMap<number, MultiPvLine[]>();
+	// Set while hovering a suggested move, to preview it on the board
+	// without changing currentPlyIdx (cleared on mouse-leave).
+	let antiGaffePreviewFen = $state<string | null>(null);
 
 	// ── Full-game engine evaluation (CPL classification) ────────────────────────
 	// positionEvals maps position index → engine eval from white's perspective.
@@ -472,6 +478,8 @@
 			antiGaffeMultiPvCandidateId = null;
 			antiGaffeMultiPvLines = null;
 			antiGaffeMultiPvLoading = false;
+			antiGaffeMultiPvCache.clear();
+			antiGaffePreviewFen = null;
 			activeTab = 'deviation';
 			analysisError = null;
 			untrack(() => {
@@ -520,7 +528,8 @@
 
 	// The FEN currently shown on the board.
 	const currentFen = $derived(
-		analysis ? (analysis.fenHistory[currentPlyIdx] ?? STARTING_FEN) : STARTING_FEN
+		antiGaffePreviewFen ??
+			(analysis ? (analysis.fenHistory[currentPlyIdx] ?? STARTING_FEN) : STARTING_FEN)
 	);
 
 	// Last move for the yellow highlight on the board.
@@ -651,21 +660,56 @@
 	// Jump the board to the position BEFORE the mistake — candidate.ply is
 	// the fenHistory index of that position (see antiGaffeScan.ts), i.e.
 	// exactly the puzzle position: "what should have been played here".
-	// Also kicks off an on-demand MultiPV-3 lookup for that position, shown
-	// once it resolves — a fresh search, not something the scan stored.
+	// Also kicks off an on-demand MultiPV-3 lookup for that position —
+	// cached per candidate, so clicking the same one again just re-shows
+	// the cached lines instead of re-running the (slow) engine search.
 	async function jumpToAntiGaffeCandidate(candidate: AntiGaffeCandidate): Promise<void> {
 		currentPlyIdx = candidate.ply;
-
 		antiGaffeMultiPvCandidateId = candidate.id;
+
+		const cached = antiGaffeMultiPvCache.get(candidate.id);
+		if (cached) {
+			antiGaffeMultiPvLines = cached;
+			antiGaffeMultiPvLoading = false;
+			return;
+		}
+
 		antiGaffeMultiPvLines = null;
 		antiGaffeMultiPvLoading = true;
 		try {
 			const lines = await evaluatePositionMultiPv(candidate.fen, 3);
+			antiGaffeMultiPvCache.set(candidate.id, lines);
 			if (antiGaffeMultiPvCandidateId !== candidate.id) return; // superseded by a later click
 			antiGaffeMultiPvLines = lines;
 		} finally {
 			if (antiGaffeMultiPvCandidateId === candidate.id) antiGaffeMultiPvLoading = false;
 		}
+	}
+
+	// Fills the move input with a suggested line rather than requiring it
+	// to be typed by hand.
+	function pickAntiGaffeSuggestion(candidateId: number, san: string | null): void {
+		if (!san) return;
+		antiGaffeMoveInputs.set(candidateId, san);
+	}
+
+	// Hover preview: shows what the board looks like after a suggested
+	// move, without touching currentPlyIdx (see currentFen's derivation).
+	function previewAntiGaffeMove(fen: string, moveUci: string): void {
+		try {
+			const chess = new Chess(fen);
+			const from = moveUci.slice(0, 2);
+			const to = moveUci.slice(2, 4);
+			const promotion = moveUci.length > 4 ? moveUci.slice(4) : undefined;
+			const move = chess.move({ from, to, promotion });
+			if (move) antiGaffePreviewFen = chess.fen();
+		} catch {
+			/* leave the board as-is */
+		}
+	}
+
+	function clearAntiGaffePreview(): void {
+		antiGaffePreviewFen = null;
 	}
 
 	// Compute the from/to squares of a SAN move from a given FEN.
@@ -1469,6 +1513,8 @@
 		antiGaffeMultiPvCandidateId = null;
 		antiGaffeMultiPvLines = null;
 		antiGaffeMultiPvLoading = false;
+		antiGaffeMultiPvCache.clear();
+		antiGaffePreviewFen = null;
 		activeTab = 'deviation';
 		pgnText = '';
 		analysisError = null;
@@ -2385,7 +2431,7 @@
 			{:else}
 				<div class="issues-list">
 					{#each antiGaffeCandidates as candidate (candidate.id)}
-						<div class="issue-item">
+						<div class="issue-card" class:issue-active={currentPlyIdx === candidate.ply}>
 							<button class="issue-header" onclick={() => jumpToAntiGaffeCandidate(candidate)}>
 								Ply {candidate.ply + 1} · {candidate.playedSan} · -{candidate.cpLoss}cp
 							</button>
@@ -2396,12 +2442,19 @@
 									<ul class="multipv-lines">
 										{#each antiGaffeMultiPvLines as line, i (line.moveUci)}
 											<li>
-												{i + 1}. {line.moveSan ?? line.moveUci}
-												{#if line.evalMate != null}
-													(#{line.evalMate})
-												{:else if line.evalCp != null}
-													({line.evalCp > 0 ? '+' : ''}{(line.evalCp / 100).toFixed(2)})
-												{/if}
+												<button
+													class="multipv-line-btn"
+													onmouseenter={() => previewAntiGaffeMove(candidate.fen, line.moveUci)}
+													onmouseleave={clearAntiGaffePreview}
+													onclick={() => pickAntiGaffeSuggestion(candidate.id, line.moveSan)}
+												>
+													{i + 1}. {line.moveSan ?? line.moveUci}
+													{#if line.evalMate != null}
+														(#{line.evalMate})
+													{:else if line.evalCp != null}
+														({line.evalCp > 0 ? '+' : ''}{(line.evalCp / 100).toFixed(2)})
+													{/if}
+												</button>
 											</li>
 										{/each}
 									</ul>
@@ -3096,6 +3149,24 @@
 		padding: var(--space-1) 0;
 		font-size: 0.85em;
 		color: var(--color-text-muted);
+	}
+
+	.multipv-line-btn {
+		display: block;
+		width: 100%;
+		text-align: left;
+		background: none;
+		border: none;
+		cursor: pointer;
+		color: inherit;
+		font: inherit;
+		padding: 2px var(--space-2);
+		border-radius: var(--radius-sm);
+	}
+
+	.multipv-line-btn:hover {
+		background: var(--color-surface);
+		color: var(--color-text);
 	}
 
 	.eval-progress {

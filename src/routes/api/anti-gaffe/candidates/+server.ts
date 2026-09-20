@@ -142,6 +142,42 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 		throw error(400, `cp_loss (${cpLoss}) is below the ${MIN_CP_LOSS}cp threshold`);
 	}
 
+	// Re-scanning a game (the button doesn't prevent it, and re-opening an
+	// already-scanned game is a normal thing to do) must never create a
+	// second row for a mistake already known at this exact ply — that's
+	// what produced literal duplicates in the list before this check
+	// existed. A candidate already decided (accepted/rejected) is left
+	// untouched — a rescan should never resurrect a decision the user
+	// already made. A still-pending one is refreshed in place with the
+	// fresh numbers rather than duplicated.
+	const gameColumn =
+		gameSource === 'imported' ? antiGaffeCandidate.importedGameId : antiGaffeCandidate.reviewedGameId;
+
+	const [existing] = await db
+		.select()
+		.from(antiGaffeCandidate)
+		.where(and(eq(gameColumn, gameId), eq(antiGaffeCandidate.ply, ply)));
+
+	if (existing) {
+		if (existing.status !== 'pending') {
+			return json(existing, { status: 200 });
+		}
+		const [updated] = await db
+			.update(antiGaffeCandidate)
+			.set({
+				fen,
+				playedSan,
+				evalBeforeCp,
+				evalAfterCp,
+				cpLoss,
+				bestMoveUci: typeof bestMoveUci === 'string' ? bestMoveUci : null,
+				bestMoveSan: typeof bestMoveSan === 'string' ? bestMoveSan : null
+			})
+			.where(eq(antiGaffeCandidate.id, existing.id))
+			.returning();
+		return json(updated, { status: 200 });
+	}
+
 	const [candidate] = await db
 		.insert(antiGaffeCandidate)
 		.values({
