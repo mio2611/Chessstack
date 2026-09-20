@@ -35,7 +35,7 @@
 	import type { Key } from '@lichess-org/chessground/types';
 	import { Chess } from 'chess.js';
 	import { STARTING_FEN, fenKey } from '$lib/fen';
-	import { evaluatePosition } from '$lib/client/stockfish';
+	import { evaluatePosition, evaluatePositionMultiPv, type MultiPvLine } from '$lib/client/stockfish';
 	import { evaluateGame } from '$lib/client/gameEval';
 	import { scanGameForAntiGaffe } from '$lib/client/antiGaffeScan';
 
@@ -349,6 +349,12 @@
 	let antiGaffeConflicts = new SvelteMap<number, string>();
 	// candidateId → editable confirmed-move input, seeded from bestMoveSan.
 	let antiGaffeMoveInputs = new SvelteMap<number, string>();
+	// On-demand top-3 candidate moves for whichever candidate was last
+	// clicked — not computed by the scan itself (MultiPV search is slower
+	// per position, and the scan already runs long enough at MultiPV 1).
+	let antiGaffeMultiPvCandidateId = $state<number | null>(null);
+	let antiGaffeMultiPvLines = $state<MultiPvLine[] | null>(null);
+	let antiGaffeMultiPvLoading = $state(false);
 
 	// ── Full-game engine evaluation (CPL classification) ────────────────────────
 	// positionEvals maps position index → engine eval from white's perspective.
@@ -463,6 +469,9 @@
 			antiGaffeCandidates = [];
 			antiGaffeMoveInputs.clear();
 			antiGaffeConflicts.clear();
+			antiGaffeMultiPvCandidateId = null;
+			antiGaffeMultiPvLines = null;
+			antiGaffeMultiPvLoading = false;
 			activeTab = 'deviation';
 			analysisError = null;
 			untrack(() => {
@@ -634,9 +643,29 @@
 
 	// ── Helpers ─────────────────────────────────────────────────────────────────
 
-	// Jump the board to the position after the issue move.
+	// Jump the board to the issue move.
 	function jumpToIssue(issue: GameIssue): void {
 		currentPlyIdx = issue.ply;
+	}
+
+	// Jump the board to the position BEFORE the mistake — candidate.ply is
+	// the fenHistory index of that position (see antiGaffeScan.ts), i.e.
+	// exactly the puzzle position: "what should have been played here".
+	// Also kicks off an on-demand MultiPV-3 lookup for that position, shown
+	// once it resolves — a fresh search, not something the scan stored.
+	async function jumpToAntiGaffeCandidate(candidate: AntiGaffeCandidate): Promise<void> {
+		currentPlyIdx = candidate.ply;
+
+		antiGaffeMultiPvCandidateId = candidate.id;
+		antiGaffeMultiPvLines = null;
+		antiGaffeMultiPvLoading = true;
+		try {
+			const lines = await evaluatePositionMultiPv(candidate.fen, 3);
+			if (antiGaffeMultiPvCandidateId !== candidate.id) return; // superseded by a later click
+			antiGaffeMultiPvLines = lines;
+		} finally {
+			if (antiGaffeMultiPvCandidateId === candidate.id) antiGaffeMultiPvLoading = false;
+		}
 	}
 
 	// Compute the from/to squares of a SAN move from a given FEN.
@@ -1437,6 +1466,9 @@
 		antiGaffeCandidates = [];
 		antiGaffeMoveInputs.clear();
 		antiGaffeConflicts.clear();
+		antiGaffeMultiPvCandidateId = null;
+		antiGaffeMultiPvLines = null;
+		antiGaffeMultiPvLoading = false;
 		activeTab = 'deviation';
 		pgnText = '';
 		analysisError = null;
@@ -2354,9 +2386,27 @@
 				<div class="issues-list">
 					{#each antiGaffeCandidates as candidate (candidate.id)}
 						<div class="issue-item">
-							<div class="issue-header">
+							<button class="issue-header" onclick={() => jumpToAntiGaffeCandidate(candidate)}>
 								Ply {candidate.ply + 1} · {candidate.playedSan} · -{candidate.cpLoss}cp
-							</div>
+							</button>
+							{#if antiGaffeMultiPvCandidateId === candidate.id}
+								{#if antiGaffeMultiPvLoading}
+									<div class="multipv-loading">Analyzing…</div>
+								{:else if antiGaffeMultiPvLines}
+									<ul class="multipv-lines">
+										{#each antiGaffeMultiPvLines as line, i (line.moveUci)}
+											<li>
+												{i + 1}. {line.moveSan ?? line.moveUci}
+												{#if line.evalMate != null}
+													(#{line.evalMate})
+												{:else if line.evalCp != null}
+													({line.evalCp > 0 ? '+' : ''}{(line.evalCp / 100).toFixed(2)})
+												{/if}
+											</li>
+										{/each}
+									</ul>
+								{/if}
+							{/if}
 							{#if candidate.status === 'pending'}
 								<label class="candidate-move-label">
 									Move to play:
@@ -3032,6 +3082,20 @@
 	.tab-btn--active {
 		color: var(--color-text);
 		border-bottom-color: var(--color-accent);
+	}
+
+	.multipv-loading {
+		font-size: 0.85em;
+		color: var(--color-text-muted);
+		padding: var(--space-1) 0;
+	}
+
+	.multipv-lines {
+		list-style: none;
+		margin: 0;
+		padding: var(--space-1) 0;
+		font-size: 0.85em;
+		color: var(--color-text-muted);
 	}
 
 	.eval-progress {

@@ -158,6 +158,12 @@ export function evaluatePosition(
 		let evalMate: number | null = null;
 		let depthReached = 0;
 
+		// Explicit reset: if evaluatePositionMultiPv ran just before this call
+		// on the same shared engine, MultiPV would still be set to whatever
+		// it left it at. Without this, a single-PV call right after a
+		// multi-PV one could receive "multipv 2"/"multipv 3" info lines
+		// mixed in, which the parsing below does not filter by multipv slot.
+		w.postMessage('setoption name MultiPV value 1');
 		w.postMessage(`position fen ${fen}`);
 		w.postMessage(`go depth ${TARGET_DEPTH}`);
 
@@ -214,6 +220,97 @@ export function evaluatePosition(
 
 	const result = queue.then(run, run);
 	// Swallow so a failed evaluation doesn't poison the queue for the next call.
+	queue = result.catch(() => undefined);
+	return result;
+}
+
+export interface MultiPvLine {
+	/** Raw score in centipawns, from the perspective of the side to move. Null if mate score applies instead. */
+	evalCp: number | null;
+	evalMate: number | null;
+	moveUci: string;
+	moveSan: string | null;
+}
+
+const MULTIPV_RE = /multipv (\d+)/;
+const PV_MOVE_RE = /\bpv (\S+)/;
+
+/**
+ * Like evaluatePosition, but asks the engine for the top `lines` moves
+ * instead of just one — for showing candidates when a position is being
+ * studied, not for the anti-gaffe scan itself (which only ever needs the
+ * single best eval and stays on evaluatePosition/MultiPV 1, since MultiPV
+ * search is slower per position and the scan already runs long enough).
+ *
+ * Same depth/watchdog/queue behaviour as evaluatePosition — see its own
+ * comments. Returns fewer than `lines` entries if the position has fewer
+ * legal moves than requested, or none at all on checkmate/stalemate.
+ */
+export function evaluatePositionMultiPv(
+	fen: string,
+	lines: number,
+	onProgress?: (p: EvalProgress) => void
+): Promise<MultiPvLine[]> {
+	const run = async (): Promise<MultiPvLine[]> => {
+		const w = getWorker();
+		if (!readyPromise) readyPromise = ensureReady(w);
+		await readyPromise;
+
+		// slot (1-indexed, per UCI's "multipv N") → latest line seen for it.
+		const slots = new Map<number, MultiPvLine>();
+		let depthReached = 0;
+
+		w.postMessage(`setoption name MultiPV value ${lines}`);
+		w.postMessage(`position fen ${fen}`);
+		w.postMessage(`go depth ${TARGET_DEPTH}`);
+
+		try {
+			await waitFor(
+				w,
+				(l) => BESTMOVE_RE.test(l),
+				(line) => {
+					const depthMatch = INFO_DEPTH_RE.exec(line);
+					if (!depthMatch) return;
+					depthReached = parseInt(depthMatch[1], 10);
+					onProgress?.({ depth: depthReached });
+
+					const multipvMatch = MULTIPV_RE.exec(line);
+					const pvMatch = PV_MOVE_RE.exec(line);
+					if (!multipvMatch || !pvMatch) return;
+					const slot = parseInt(multipvMatch[1], 10);
+					const moveUci = pvMatch[1];
+
+					const cpMatch = SCORE_CP_RE.exec(line);
+					const mateMatch = SCORE_MATE_RE.exec(line);
+					slots.set(slot, {
+						evalCp: cpMatch ? parseInt(cpMatch[1], 10) : null,
+						evalMate: mateMatch ? parseInt(mateMatch[1], 10) : null,
+						moveUci,
+						moveSan: uciToSan(fen, moveUci)
+					});
+				}
+			);
+
+			// Reset back to 1 immediately — see evaluatePosition's own reset
+			// for why leaving this at N would corrupt the next single-PV call.
+			w.postMessage('setoption name MultiPV value 1');
+
+			return Array.from(slots.keys())
+				.sort((a, b) => a - b)
+				.map((slot) => slots.get(slot)!);
+		} catch (err) {
+			w.postMessage('setoption name MultiPV value 1');
+			if (err instanceof Error && err.message === 'stockfish-watchdog-timeout') {
+				w.postMessage('stop');
+				return Array.from(slots.keys())
+					.sort((a, b) => a - b)
+					.map((slot) => slots.get(slot)!);
+			}
+			throw err;
+		}
+	};
+
+	const result = queue.then(run, run);
 	queue = result.catch(() => undefined);
 	return result;
 }
