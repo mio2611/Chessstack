@@ -1472,6 +1472,21 @@
 		}
 	}
 
+	// Reverts an accept/reject clicked by mistake — see the endpoint's own
+	// comment for what happens to the card on undoing an accept.
+	async function undoAntiGaffeCandidate(candidateId: number): Promise<void> {
+		antiGaffeActionLoading.set(candidateId, true);
+		try {
+			const res = await fetch(`/api/anti-gaffe/candidates/${candidateId}/undo`, {
+				method: 'POST'
+			});
+			if (!res.ok) return;
+			await loadAntiGaffeCandidates();
+		} finally {
+			antiGaffeActionLoading.set(candidateId, false);
+		}
+	}
+
 	async function saveReview(): Promise<void> {
 		if (!parsedPgn || !analysis || saving) return;
 		saving = true;
@@ -2507,7 +2522,16 @@
 									</div>
 								{/if}
 							{:else}
-								<div class="issue-status">{candidate.status}</div>
+								<div class="issue-status">
+									{candidate.status}
+									<button
+										class="btn btn--sm btn--ghost"
+										onclick={() => undoAntiGaffeCandidate(candidate.id)}
+										disabled={antiGaffeActionLoading.get(candidate.id)}
+									>
+										Undo
+									</button>
+								</div>
 							{/if}
 						</div>
 					{/each}
@@ -3167,6 +3191,9 @@
 	}
 
 	.issue-status {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
 		padding: 0 var(--space-3) var(--space-3);
 		font-size: 0.85em;
 		color: var(--color-text-muted);
