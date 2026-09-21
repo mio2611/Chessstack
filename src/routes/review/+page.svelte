@@ -3426,6 +3426,7 @@
 		padding: var(--space-2) var(--space-3);
 		text-align: left;
 		font-family: var(--font-body);
+		color: var(--color-text-primary);
 	}
 
 	.issue-type-label {
