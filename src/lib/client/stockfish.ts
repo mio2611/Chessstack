@@ -14,6 +14,13 @@
 // WATCHDOG_MS without emitting a single depth-progress line, the search is
 // treated as failed (engine hang/crash) rather than waited on forever.
 //
+// Every search sends ucinewgame first — see resetForNewSearch's comment.
+// Without it, the hash table carries over between unrelated positions
+// evaluated in the same session, and a nominally identical depth-20 search
+// can silently produce a different score and a different best move
+// depending purely on what was evaluated beforehand. Confirmed by direct
+// testing against native Stockfish before this was added.
+//
 // Perspective convention: evalCp/evalMate are returned RAW, from the
 // perspective of the side to move in the given FEN (standard UCI
 // convention) — this module does not flip to White's perspective. Callers
@@ -115,6 +122,23 @@ async function ensureReady(w: Worker): Promise<void> {
 	await waitFor(w, (l) => l === 'readyok');
 }
 
+// Confirmed by direct testing against native Stockfish: without ucinewgame,
+// the transposition hash table carries over between unrelated positions
+// evaluated in the same session. Same FEN, same requested depth, genuinely
+// different score AND different best move depending on what was evaluated
+// beforehand — reproduced with a fresh engine vs. one that had searched 5
+// unrelated positions first (score off by ~0.2 pawns, different bestmove,
+// fewer nodes searched despite reaching the same nominal depth). Sent
+// before every single search, with the isready/readyok round-trip the UCI
+// protocol recommends after ucinewgame (the engine may need a moment to
+// actually clear the table).
+async function resetForNewSearch(w: Worker, multiPv: number): Promise<void> {
+	w.postMessage('ucinewgame');
+	w.postMessage(`setoption name MultiPV value ${multiPv}`);
+	w.postMessage('isready');
+	await waitFor(w, (l) => l === 'readyok');
+}
+
 const INFO_DEPTH_RE = /^info depth (\d+)/;
 const SCORE_CP_RE = /score cp (-?\d+)/;
 const SCORE_MATE_RE = /score mate (-?\d+)/;
@@ -158,12 +182,11 @@ export function evaluatePosition(
 		let evalMate: number | null = null;
 		let depthReached = 0;
 
-		// Explicit reset: if evaluatePositionMultiPv ran just before this call
-		// on the same shared engine, MultiPV would still be set to whatever
-		// it left it at. Without this, a single-PV call right after a
-		// multi-PV one could receive "multipv 2"/"multipv 3" info lines
-		// mixed in, which the parsing below does not filter by multipv slot.
-		w.postMessage('setoption name MultiPV value 1');
+		// See resetForNewSearch's comment: without this, the hash table
+		// carries over stale entries from whatever was searched before,
+		// producing a different score/bestmove for a nominally identical
+		// depth-20 search depending purely on evaluation order.
+		await resetForNewSearch(w, 1);
 		w.postMessage(`position fen ${fen}`);
 		w.postMessage(`go depth ${TARGET_DEPTH}`);
 
@@ -260,7 +283,7 @@ export function evaluatePositionMultiPv(
 		const slots = new Map<number, MultiPvLine>();
 		let depthReached = 0;
 
-		w.postMessage(`setoption name MultiPV value ${lines}`);
+		await resetForNewSearch(w, lines);
 		w.postMessage(`position fen ${fen}`);
 		w.postMessage(`go depth ${TARGET_DEPTH}`);
 
@@ -291,15 +314,10 @@ export function evaluatePositionMultiPv(
 				}
 			);
 
-			// Reset back to 1 immediately — see evaluatePosition's own reset
-			// for why leaving this at N would corrupt the next single-PV call.
-			w.postMessage('setoption name MultiPV value 1');
-
 			return Array.from(slots.keys())
 				.sort((a, b) => a - b)
 				.map((slot) => slots.get(slot)!);
 		} catch (err) {
-			w.postMessage('setoption name MultiPV value 1');
 			if (err instanceof Error && err.message === 'stockfish-watchdog-timeout') {
 				w.postMessage('stop');
 				return Array.from(slots.keys())
