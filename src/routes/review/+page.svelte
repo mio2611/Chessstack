@@ -1749,6 +1749,16 @@
 									{/if}
 								</div>
 								<div class="import-actions">
+									<!-- Independent of deviation status below: set purely by
+									     anti_gaffe_scanned_at, never by imported_game.status.
+									     See anti-gaffe-module design notes. -->
+									{#if game.antiGaffeScannedAt}
+										<span class="import-badge import-badge--scanned">Anti-gaffe: scanned</span>
+									{:else}
+										<span class="import-badge import-badge--not-scanned"
+											>Anti-gaffe: not scanned</span
+										>
+									{/if}
 									{#if game.status === 'pending'}
 										<button
 											class="btn btn--sm btn--primary"
@@ -1764,7 +1774,7 @@
 											Skip
 										</button>
 									{:else if game.status === 'reviewed'}
-										<span class="import-badge import-badge--reviewed">Reviewed</span>
+										<span class="import-badge import-badge--reviewed">Deviation: reviewed</span>
 										<button
 											class="btn btn--sm btn--ghost"
 											onclick={() => startReviewImportedGame(game.id)}
@@ -1773,7 +1783,14 @@
 											{repPickerLoading && repPickerGameId === game.id ? 'Loading…' : 'Re-open'}
 										</button>
 									{:else}
-										<span class="import-badge import-badge--skipped">Skipped</span>
+										<span class="import-badge import-badge--skipped">Deviation: skipped</span>
+										<button
+											class="btn btn--sm btn--ghost"
+											onclick={() => startReviewImportedGame(game.id)}
+											disabled={repPickerLoading && repPickerGameId === game.id}
+										>
+											{repPickerLoading && repPickerGameId === game.id ? 'Loading…' : 'Open'}
+										</button>
 										<button
 											class="btn btn--sm btn--ghost"
 											onclick={() => unskipImportedGame(game.id)}
@@ -2954,6 +2971,16 @@
 	}
 
 	.import-badge--skipped {
+		background: rgba(160, 160, 160, 0.12);
+		color: var(--color-text-muted);
+	}
+
+	.import-badge--scanned {
+		background: var(--color-anti-gaffe-bg);
+		color: var(--color-anti-gaffe-text);
+	}
+
+	.import-badge--not-scanned {
 		background: rgba(160, 160, 160, 0.12);
 		color: var(--color-text-muted);
 	}
