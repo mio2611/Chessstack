@@ -11,6 +11,8 @@ import type { RequestHandler } from './$types';
 import { db } from '$lib/db';
 import { antiGaffeCard } from '$lib/db/schema';
 import { eq, and, lte } from 'drizzle-orm';
+import { intervalLabels } from '$lib/fsrs';
+import { loadFsrsConfig } from '$lib/server/fsrs-config';
 
 export const GET: RequestHandler = async ({ locals }) => {
 	if (!locals.user) throw error(401, 'Not authenticated');
@@ -23,5 +25,10 @@ export const GET: RequestHandler = async ({ locals }) => {
 		.orderBy(antiGaffeCard.due)
 		.limit(1);
 
-	return json(dueCard ?? null);
+	if (!dueCard) return json(null);
+
+	const now = new Date();
+	const fsrsConfig = await loadFsrsConfig(userId);
+
+	return json({ ...dueCard, intervalLabels: intervalLabels(dueCard, now, fsrsConfig) });
 };
