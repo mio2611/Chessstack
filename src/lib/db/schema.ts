@@ -781,6 +781,7 @@ export const antiGaffeReviewLog = pgTable(
 
 		rating: integer('rating').notNull(), // 1=Again, 3=Good, 4=Easy
 		reviewedAt: timestamp('reviewed_at').notNull(),
+		source: text('source').notNull(), // "ANTI_GAFFE" — only one drill mode exists for this card type
 
 		stateBefore: integer('state_before').notNull(),
 		stabilityBefore: doublePrecision('stability_before'),
