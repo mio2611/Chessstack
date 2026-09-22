@@ -18,6 +18,8 @@
 
 	import ChessBoard from '$lib/components/ChessBoard.svelte';
 	import ResizableBoard from '$lib/components/ResizableBoard.svelte';
+	import type { DrawShape } from '@lichess-org/chessground/draw';
+	import type { Key } from '@lichess-org/chessground/types';
 	import { onMount } from 'svelte';
 	import { Chess } from 'chess.js';
 	import { initSounds, setSoundEnabled, playMove, playCorrect, playIncorrect } from '$lib/sounds';
@@ -53,6 +55,15 @@
 	// turns out to be unparseable against fen (shouldn't happen, but a
 	// stale/edited card is possible).
 	let expected = $state<{ from: string; to: string; promotion: string | undefined } | null>(null);
+
+	// Green arrow for the correct move, shown once the answer is revealed
+	// after a wrong move — same mechanism build mode uses for its own
+	// candidate-move arrows.
+	const arrowShapes = $derived<DrawShape[]>(
+		phase === 'incorrect' && expected
+			? [{ orig: expected.from as Key, dest: expected.to as Key, brush: 'green' }]
+			: []
+	);
 
 	const timers = new Set<ReturnType<typeof setTimeout>>();
 	function safeTimeout(fn: () => void, ms: number) {
@@ -209,6 +220,7 @@
 							boardTheme={data.settings?.boardTheme ?? 'blue'}
 							interactive={phase === 'playing'}
 							{lastMove}
+							autoShapes={arrowShapes}
 							onMove={handleMove}
 						/>
 					{/key}
