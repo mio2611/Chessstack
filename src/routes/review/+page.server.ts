@@ -134,6 +134,13 @@ export const actions: Actions = {
 
 		let bestRep: RepRow | null;
 		let bestMoves: MoveRow;
+		// True when the user genuinely has no repertoire of this color at all —
+		// distinct from "has repertoires, none match this opening" (existing
+		// fallback below to the biggest one). Deviation analysis is skipped in
+		// this case, but the game still loads (fenHistory, etc.) so other
+		// per-game tabs that don't depend on a repertoire — e.g. Anti-gaffe —
+		// still work.
+		let noRepertoire = false;
 
 		if (repertoireIdOverride) {
 			// Import flow — use the explicitly specified repertoire.
@@ -159,47 +166,51 @@ export const actions: Actions = {
 				.where(and(eq(repertoire.userId, locals.user.id), eq(repertoire.color, playerColor)));
 
 			if (allReps.length === 0) {
-				return fail(400, {
-					error: `No ${playerColor.toLowerCase()} repertoire found for this game (${openingMoves}). Create one first.`
-				});
-			}
-
-			// Load moves for each repertoire and score by opening overlap.
-			const repData: { rep: (typeof allReps)[0]; moves: MoveRow; depth: number }[] = [];
-			for (const rep of allReps) {
-				const moves = await db
-					.select()
-					.from(userMove)
-					.where(and(eq(userMove.userId, locals.user.id), eq(userMove.repertoireId, rep.id)));
-				const depth = computeMatchDepth(parsed.moves, moves, playerColor);
-				repData.push({ rep, moves, depth });
-			}
-
-			// Pick the repertoire with the deepest opening match.
-			repData.sort((a, b) => b.depth - a.depth);
-			const best = repData[0];
-
-			if (best.depth > 0) {
-				bestRep = best.rep;
-				bestMoves = best.moves;
+				bestRep = null;
+				bestMoves = [];
+				noRepertoire = true;
 			} else {
-				// No repertoire covers the game's opening at all — use the one
-				// with the most moves (most likely the user's primary repertoire).
-				const bySize = [...repData].sort((a, b) => b.moves.length - a.moves.length);
-				bestRep = bySize[0].rep;
-				bestMoves = bySize[0].moves;
+				// Load moves for each repertoire and score by opening overlap.
+				const repData: { rep: (typeof allReps)[0]; moves: MoveRow; depth: number }[] = [];
+				for (const rep of allReps) {
+					const moves = await db
+						.select()
+						.from(userMove)
+						.where(and(eq(userMove.userId, locals.user.id), eq(userMove.repertoireId, rep.id)));
+					const depth = computeMatchDepth(parsed.moves, moves, playerColor);
+					repData.push({ rep, moves, depth });
+				}
+
+				// Pick the repertoire with the deepest opening match.
+				repData.sort((a, b) => b.depth - a.depth);
+				const best = repData[0];
+
+				if (best.depth > 0) {
+					bestRep = best.rep;
+					bestMoves = best.moves;
+				} else {
+					// No repertoire covers the game's opening at all — use the one
+					// with the most moves (most likely the user's primary repertoire).
+					const bySize = [...repData].sort((a, b) => b.moves.length - a.moves.length);
+					bestRep = bySize[0].rep;
+					bestMoves = bySize[0].moves;
+				}
 			}
 		}
 
-		if (!bestRep || !bestMoves) {
+		if (!noRepertoire && (!bestRep || !bestMoves)) {
 			return fail(400, { error: 'No matching repertoire found' });
 		}
 
-		// Use the matched repertoire's color if the user didn't explicitly override.
+		// Use the matched repertoire's color if the user didn't explicitly
+		// override it. With no repertoire at all (noRepertoire), fall back to
+		// playerColor — there's no bestRep.color to use instead.
 		const finalColor: 'WHITE' | 'BLACK' =
 			colorOverride === 'WHITE' || colorOverride === 'BLACK'
 				? colorOverride
-				: (bestRep.color as 'WHITE' | 'BLACK');
+				: bestRep
+					? (bestRep.color as 'WHITE' | 'BLACK')
+					: playerColor;
 
 		const analysis = analyzeGame(parsed, bestMoves, finalColor);
 
@@ -208,8 +219,8 @@ export const actions: Actions = {
 			parsedPgn: parsed.pgn,
 			headers: parsed.headers,
 			playerColor: finalColor,
-			repertoireId: bestRep.id,
-			repertoireName: bestRep.name
+			repertoireId: bestRep?.id ?? null,
+			repertoireName: bestRep?.name ?? null
 		};
 	}
 };

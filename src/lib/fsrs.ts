@@ -175,7 +175,7 @@ export function gradeCard(
 export interface ReviewLogEntry {
 	rating: Rating;
 	reviewedAt: Date;
-	source: 'DRILL' | 'REVIEW_DEVIATION' | 'ENDGAME_PRACTICE' | 'ENDGAME_THEORY';
+	source: 'DRILL' | 'REVIEW_DEVIATION' | 'ENDGAME_PRACTICE' | 'ENDGAME_THEORY' | 'ANTI_GAFFE';
 	stateBefore: number;
 	stabilityBefore: number | null;
 	difficultyBefore: number | null;

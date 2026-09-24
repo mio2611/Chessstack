@@ -16,9 +16,7 @@ import { getTopMoves } from './index';
 // Lower than the interactive Engine tab's depth (15–30, user-configurable).
 // This runs in the background for up to a dozen candidate moves per
 // position rather than for a single line the user is actively studying, so
-// it trades precision for latency. Matches BATCH_DEPTH in
-// /api/stockfish/batch, used for the same reason (classifying many
-// positions, not producing a precise eval for one).
+// it trades precision for latency.
 export const POSITION_EVAL_DEPTH = 14;
 
 const EVAL_TIMEOUT_MS = 5_000;
@@ -34,7 +32,7 @@ export interface PositionEval {
 // The returned eval is in Stockfish's raw convention — from the perspective
 // of whoever is to move in `fen` — same as getTopMoves(). Callers apply
 // their own white-perspective flip based on `fen`'s side to move, same
-// pattern as /api/stockfish/stream and /api/stockfish/batch.
+// pattern as /api/stockfish/stream.
 export async function getCachedEval(fen: string): Promise<PositionEval> {
 	const [cached] = await db
 		.select({ evalCp: positionEvalCache.evalCp, evalMate: positionEvalCache.evalMate })
