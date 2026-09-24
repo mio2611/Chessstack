@@ -417,16 +417,18 @@ export const reviewedGame = pgTable(
 		userId: integer('user_id')
 			.notNull()
 			.references(() => user.id, { onDelete: 'cascade' }),
-		repertoireId: integer('repertoire_id')
-			.notNull()
-			.references(() => repertoire.id, { onDelete: 'cascade' }),
+		repertoireId: integer('repertoire_id').references(() => repertoire.id, { onDelete: 'cascade' }), // nullable — a pasted game with no matching repertoire can still be saved (see migration 0034)
 		pgn: text('pgn').notNull(), // full PGN of the reviewed game
 		source: text('source').notNull(), // "MANUAL" (pasted) or "LICHESS" (imported)
 		lichessGameId: text('lichess_game_id'), // Lichess game ID, used to prevent duplicate imports
 		deviationFen: text('deviation_fen'), // the position where the user went off-book
 		playedAt: timestamp('played_at'), // when the original game was played
 		reviewedAt: timestamp('reviewed_at').notNull(), // when the user reviewed it here
-		notes: text('notes')
+		notes: text('notes'),
+		// Independent of the deviation workflow above: set when an anti-gaffe
+		// scan of this game finishes, whether or not it found any
+		// candidates. See anti_gaffe_candidate.
+		antiGaffeScannedAt: timestamp('anti_gaffe_scanned_at')
 	},
 	(table) => ({
 		repertoireIdIdx: index('idx_reviewed_game_repertoire_id').on(table.repertoireId)
@@ -456,10 +458,14 @@ export const importedGame = pgTable(
 		result: text('result'), // '1-0', '0-1', '1/2-1/2'
 		playedAt: timestamp('played_at'), // when the game was played on the platform
 		importedAt: timestamp('imported_at').notNull(), // when we fetched it
-		status: text('status').notNull().default('pending'), // 'pending', 'reviewed', 'skipped'
+		status: text('status').notNull().default('pending'), // 'pending', 'reviewed', 'skipped' — deviation workflow only
 		reviewedGameId: integer('reviewed_game_id').references(() => reviewedGame.id, {
 			onDelete: 'set null'
-		}) // set when review is saved
+		}), // set when review is saved
+		// Independent of status above: set when an anti-gaffe scan of this
+		// game finishes, whether or not it found any candidates. See
+		// anti_gaffe_candidate.
+		antiGaffeScannedAt: timestamp('anti_gaffe_scanned_at')
 	},
 	(table) => ({
 		uniqueUserSourceGame: unique().on(table.userId, table.source, table.externalGameId),
@@ -666,6 +672,136 @@ export const endgameReviewLog = pgTable(
 	(table) => ({
 		userIdIdx: index('idx_endgame_review_log_user_id').on(table.userId),
 		cardIdIdx: index('idx_endgame_review_log_card_id').on(table.cardId)
+	})
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ANTI-GAFFE MODULE
+// Positions extracted from the user's own played games (imported_game or
+// reviewed_game — see anti_gaffe_candidate) where a move lost >= 100
+// centipawns in a position that wasn't already decided. Independent of the
+// opening repertoire DAG and of the endgame module. Unlike endgamePosition,
+// there is no shared seed table: every candidate is personal.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Staging: one row per scan candidate, awaiting accept/reject. The
+// "exactly one of imported_game_id / reviewed_game_id" invariant is
+// enforced by a CHECK constraint in the migration SQL, not declared here —
+// no existing table in this file uses Drizzle's check() helper, and
+// Postgres enforces it regardless of whether the TS layer knows about it.
+export const antiGaffeCandidate = pgTable(
+	'anti_gaffe_candidate',
+	{
+		id: serial('id').primaryKey(),
+		userId: integer('user_id')
+			.notNull()
+			.references(() => user.id, { onDelete: 'cascade' }),
+
+		importedGameId: integer('imported_game_id').references(() => importedGame.id, {
+			onDelete: 'cascade'
+		}),
+		reviewedGameId: integer('reviewed_game_id').references(() => reviewedGame.id, {
+			onDelete: 'cascade'
+		}),
+
+		ply: integer('ply').notNull(), // index into the game's fenHistory
+		fen: text('fen').notNull(), // 4-field normalized FEN, position BEFORE the mistake
+		playedSan: text('played_san').notNull(),
+		evalBeforeCp: integer('eval_before_cp').notNull(), // white-perspective
+		evalAfterCp: integer('eval_after_cp').notNull(),
+		cpLoss: integer('cp_loss').notNull(), // >= 100 by construction
+		bestMoveUci: text('best_move_uci'), // engine suggestion from the scan, informational
+		bestMoveSan: text('best_move_san'),
+
+		status: text('status').notNull().default('pending'), // 'pending' | 'accepted' | 'rejected'
+		confirmedMoveSan: text('confirmed_move_san'), // set at accept time, defaults to bestMoveSan
+		cardId: integer('card_id').references((): AnyPgColumn => antiGaffeCard.id, {
+			onDelete: 'set null'
+		}),
+
+		createdAt: timestamp('created_at').notNull(),
+		reviewedAt: timestamp('reviewed_at') // when status left 'pending'
+	},
+	(table) => ({
+		userStatusIdx: index('idx_anti_gaffe_candidate_user_status').on(table.userId, table.status),
+		importedGameIdx: index('idx_anti_gaffe_candidate_imported_game').on(table.importedGameId),
+		reviewedGameIdx: index('idx_anti_gaffe_candidate_reviewed_game').on(table.reviewedGameId),
+		cardIdIdx: index('idx_anti_gaffe_candidate_card_id').on(table.cardId)
+	})
+);
+
+// One card per (user, position) — never per candidate/occurrence: review is
+// against a position, not an event. The same mistake recurring across
+// games attaches multiple candidates (see antiGaffeCandidate.cardId) to the
+// same card rather than creating duplicates. Same field set/types as
+// endgameCard's FSRS columns.
+export const antiGaffeCard = pgTable(
+	'anti_gaffe_card',
+	{
+		id: serial('id').primaryKey(),
+		userId: integer('user_id')
+			.notNull()
+			.references(() => user.id, { onDelete: 'cascade' }),
+
+		fen: text('fen').notNull(),
+		confirmedMoveSan: text('confirmed_move_san').notNull(), // the move to find during drill
+
+		due: timestamp('due'),
+		stability: doublePrecision('stability'),
+		difficulty: doublePrecision('difficulty'),
+		elapsedDays: integer('elapsed_days'),
+		scheduledDays: integer('scheduled_days'),
+		reps: integer('reps'),
+		lapses: integer('lapses'),
+		state: integer('state'), // 0=New, 1=Learning, 2=Review, 3=Relearning
+		lastReview: timestamp('last_review'),
+		learningSteps: integer('learning_steps').notNull().default(0)
+	},
+	(table) => ({
+		uniqueUserFen: unique().on(table.userId, table.fen),
+		dueIdx: index('idx_anti_gaffe_card_due').on(table.due),
+		userIdIdx: index('idx_anti_gaffe_card_user_id').on(table.userId)
+	})
+);
+
+// One row per FSRS grading event on an anti-gaffe card. Deliberately a
+// separate table from review_log and endgame_review_log — same reasoning
+// as endgame_review_log's own comment (migration 0031): a hard FK per card
+// domain, no cross-domain optimizer yet needed.
+export const antiGaffeReviewLog = pgTable(
+	'anti_gaffe_review_log',
+	{
+		id: serial('id').primaryKey(),
+		userId: integer('user_id')
+			.notNull()
+			.references(() => user.id, { onDelete: 'cascade' }),
+		cardId: integer('card_id')
+			.notNull()
+			.references(() => antiGaffeCard.id, { onDelete: 'cascade' }),
+
+		rating: integer('rating').notNull(), // 1=Again, 3=Good, 4=Easy
+		reviewedAt: timestamp('reviewed_at').notNull(),
+		source: text('source').notNull(), // "ANTI_GAFFE" — only one drill mode exists for this card type
+
+		stateBefore: integer('state_before').notNull(),
+		stabilityBefore: doublePrecision('stability_before'),
+		difficultyBefore: doublePrecision('difficulty_before'),
+		elapsedDaysBefore: integer('elapsed_days_before'),
+		scheduledDaysBefore: integer('scheduled_days_before'),
+		learningStepsBefore: integer('learning_steps_before').notNull(),
+
+		stateAfter: integer('state_after').notNull(),
+		stabilityAfter: doublePrecision('stability_after').notNull(),
+		difficultyAfter: doublePrecision('difficulty_after').notNull(),
+		elapsedDaysAfter: integer('elapsed_days_after').notNull(),
+		scheduledDaysAfter: integer('scheduled_days_after').notNull(),
+		learningStepsAfter: integer('learning_steps_after').notNull(),
+
+		requestRetention: doublePrecision('request_retention').notNull()
+	},
+	(table) => ({
+		userIdIdx: index('idx_anti_gaffe_review_log_user_id').on(table.userId),
+		cardIdIdx: index('idx_anti_gaffe_review_log_card_id').on(table.cardId)
 	})
 );
 

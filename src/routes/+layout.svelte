@@ -31,6 +31,7 @@
 		{ href: `${base}/train`, label: 'Train' },
 		{ href: `${base}/puzzles`, label: 'Puzzles' },
 		{ href: `${base}/endgame`, label: 'Endgames' },
+		{ href: `${base}/anti-gaffe`, label: 'Blunders' },
 		{ href: `${base}/review`, label: 'Review' },
 		{ href: `${base}/prep`, label: 'Prep' },
 		{ href: `${base}/stats`, label: 'Stats' },
