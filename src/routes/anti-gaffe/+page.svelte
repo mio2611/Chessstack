@@ -244,7 +244,7 @@
 		{:else if phase === 'no-cards'}
 			<div class="empty-state">
 				<h2>Nothing to review right now</h2>
-				<p class="setup-desc">All blunder positions have been seen and none are due today.</p>
+				<p class="setup-desc">No blunder positions are due today.</p>
 			</div>
 		{:else if phase === 'error'}
 			<div class="empty-state">
@@ -362,7 +362,7 @@
 		flex-direction: column;
 		gap: var(--space-4);
 		font-family: var(--font-body);
-		background: var(--color-card);
+		background: var(--color-surface);
 		border: 1px solid var(--color-border);
 		border-radius: var(--radius-lg);
 		padding: var(--space-4);
