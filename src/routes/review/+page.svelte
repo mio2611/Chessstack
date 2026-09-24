@@ -1753,10 +1753,10 @@
 									     anti_gaffe_scanned_at, never by imported_game.status.
 									     See anti-gaffe-module design notes. -->
 									{#if game.antiGaffeScannedAt}
-										<span class="import-badge import-badge--scanned">Anti-gaffe: scanned</span>
+										<span class="import-badge import-badge--scanned">Blunders: scanned</span>
 									{:else}
 										<span class="import-badge import-badge--not-scanned"
-											>Anti-gaffe: not scanned</span
+											>Blunders: not scanned</span
 										>
 									{/if}
 									{#if game.status === 'pending'}
@@ -2019,7 +2019,7 @@
 						loadAntiGaffeCandidates();
 					}}
 				>
-					Anti-gaffe
+					Blunders
 				</button>
 			</div>
 
@@ -2038,7 +2038,7 @@
 					<p class="no-issues-title">No matching repertoire</p>
 					<p class="no-issues-hint">
 						This game's opening doesn't match any of your repertoires, so deviation analysis
-						isn't available for it. The Anti-gaffe tab works independently of this.
+						isn't available for it. The Blunders tab works independently of this.
 					</p>
 				</div>
 			{:else if analysis.issues.length === 0}

@@ -242,7 +242,7 @@
 		{:else if phase === 'no-cards'}
 			<div class="empty-state">
 				<h2>Nothing to review right now</h2>
-				<p class="setup-desc">All anti-gaffe positions have been seen and none are due today.</p>
+				<p class="setup-desc">All blunder positions have been seen and none are due today.</p>
 			</div>
 		{:else if phase === 'error'}
 			<div class="empty-state">
