@@ -1,0 +1,236 @@
+diff --git a/src/routes/endgame/+page.svelte b/src/routes/endgame/+page.svelte
+index 74aa285..771dc9f 100644
+--- a/src/routes/endgame/+page.svelte
++++ b/src/routes/endgame/+page.svelte
+@@ -172,7 +172,7 @@
+ 		}
+ 
+ 		if (!evaluation.found) {
+-			errorMessage = 'Synchronisation perdue avec la tablebase. Rechargez la page.';
++			errorMessage = 'Lost sync with the tablebase. Reload the page.';
+ 			phase = 'error';
+ 			return;
+ 		}
+@@ -188,7 +188,7 @@
+ 			// still counts as Forgot even though play continues.
+ 			hadUnsoundMove = true;
+ 			playIncorrect();
+-			feedback = 'Ce coup abandonne le résultat de la position. Coup annulé, réessayez.';
++			feedback = 'That move throws away the result of the position. Move undone, try again.';
+ 			flashColor = 'red';
+ 			safeTimeout(() => (flashColor = null), 600);
+ 			boardKey++;
+@@ -205,7 +205,7 @@
+ 				// guarantees a Forgot rating at completion (see
+ 				// computeRating), this only fixes the stuck UX, not scoring.
+ 				playIncorrect();
+-				feedback = `Le coup était ${evaluation.bestMove.san}. On continue.`;
++				feedback = `The move was ${evaluation.bestMove.san}. Moving on.`;
+ 				flashColor = 'red';
+ 				safeTimeout(() => (flashColor = null), 600);
+ 
+@@ -225,7 +225,7 @@
+ 			}
+ 
+ 			playIncorrect();
+-			feedback = `Coup correct, mais pas le plus rapide vers le mat. Rejouez (essai ${currentMoveAttempts + 1}).`;
++			feedback = `Correct move, but not the fastest way to mate. Try again (attempt ${currentMoveAttempts + 1}).`;
+ 			flashColor = 'red';
+ 			safeTimeout(() => (flashColor = null), 600);
+ 			boardKey++;
+@@ -339,7 +339,7 @@
+ 			// Unlike puzzles' attempt recording, a failed grade here silently
+ 			// leaves this card's SR schedule stale — worth saying so, not
+ 			// staying quiet the way a non-critical failure normally would.
+-			feedback = "La note n'a pas pu être enregistrée (problème réseau). L'exercice suivant se charge quand même.";
++			feedback = 'The grade could not be saved (network problem). The next exercise is loading anyway.';
+ 		}
+ 
+ 		safeTimeout(fetchNextCard, 1200);
+@@ -391,9 +391,9 @@
+ 					></div>
+ 				{/if}
+ 				{#if phase === 'opponent-thinking'}
+-					<div class="status-badge">L'adversaire réfléchit&hellip;</div>
++					<div class="status-badge">Opponent thinking&hellip;</div>
+ 				{:else if phase === 'validating'}
+-					<div class="status-badge">Validation&hellip;</div>
++					<div class="status-badge">Validating&hellip;</div>
+ 				{/if}
+ 			</div>
+ 		</ResizableBoard>
+@@ -401,33 +401,36 @@
+ 
+ 	<div class="sidebar">
+ 		{#if phase === 'loading'}
+-			<p>Chargement&hellip;</p>
++			<p class="setup-desc">Loading&hellip;</p>
+ 		{:else if phase === 'no-cards'}
+ 			<div class="empty-state">
+-				<h2>Rien à réviser pour l'instant</h2>
+-				<p>Toutes les positions ont déjà été vues et aucune n'est due aujourd'hui.</p>
++				<h2>Nothing to review right now</h2>
++				<p class="setup-desc">All positions have been seen and none are due today.</p>
+ 			</div>
+ 		{:else if phase === 'error'}
+ 			<div class="empty-state">
+-				<h2>Erreur</h2>
+-				<p>{errorMessage}</p>
+-				<button onclick={fetchNextCard}>Réessayer</button>
++				<h2>Error</h2>
++				<p class="setup-desc">{errorMessage}</p>
++				<button class="retry-btn" onclick={fetchNextCard}>Retry</button>
+ 			</div>
+ 		{:else if position}
+-			<div class="position-info">
++			<div class="sidebar-header">
+ 				<span class="badge mode-badge" class:theory={mode === 'theory'}>
+-					{mode === 'theory' ? 'Théorie' : 'Pratique'}
++					{mode === 'theory' ? 'Theory' : 'Practice'}
++				</span>
++				<h2>{position.category} &mdash; {position.subcategory}</h2>
++			</div>
++			<div class="goal-display">
++				<span class="goal-label">Goal</span>
++				<span class="goal-value">
++					{position.target === 'checkmate' ? 'Checkmate' : 'Hold the draw'}
+ 				</span>
+-				<h2>{position.category} — {position.subcategory}</h2>
+-				<p class="target">
+-					{position.target === 'checkmate' ? 'Objectif : mater' : 'Objectif : tenir la nulle'}
+-				</p>
+ 			</div>
+ 			{#if feedback}
+ 				<p class="feedback">{feedback}</p>
+ 			{/if}
+ 			{#if phase === 'complete'}
+-				<p class="complete-msg">Carte notée, chargement de la suivante&hellip;</p>
++				<p class="complete-msg">Card graded, loading the next one&hellip;</p>
+ 			{/if}
+ 		{/if}
+ 	</div>
+@@ -475,6 +478,11 @@
+ 		flex-direction: column;
+ 		gap: var(--space-4);
+ 		font-family: var(--font-body);
++		background: var(--color-card);
++		border: 1px solid var(--color-border);
++		border-radius: var(--radius-lg);
++		padding: var(--space-4);
++		box-shadow: var(--shadow-surface);
+ 	}
+ 
+ 	.flash-overlay {
+@@ -515,20 +523,48 @@
+ 		border-radius: var(--radius-sm);
+ 	}
+ 
+-	.position-info {
+-		background: var(--color-surface);
+-		border: 1px solid var(--color-border);
+-		border-radius: var(--radius-md);
+-		padding: var(--space-4);
++	.sidebar-header {
++		display: flex;
++		flex-direction: column;
++		align-items: flex-start;
++		gap: var(--space-2);
+ 	}
+ 
+-	.position-info h2 {
+-		margin: var(--space-2) 0;
++	.sidebar-header h2 {
++		margin: 0;
++		font-size: 1rem;
+ 		color: var(--color-text-primary);
+ 	}
+ 
+-	.target {
++	/* Same inner box as the Trainer Rating row on /train */
++	.goal-display {
++		display: flex;
++		align-items: center;
++		justify-content: space-between;
++		padding: var(--space-2) var(--space-3);
++		border-radius: var(--radius-md);
++		background: rgba(91, 127, 164, 0.08);
++		border: 1px solid rgba(91, 127, 164, 0.2);
++	}
++
++	.goal-label {
++		font-size: 0.75rem;
+ 		color: var(--color-text-secondary);
++		text-transform: uppercase;
++		letter-spacing: 0.08em;
++		font-weight: 700;
++	}
++
++	.goal-value {
++		font-size: 0.95rem;
++		font-weight: 700;
++		color: var(--color-accent);
++	}
++
++	.setup-desc {
++		font-size: 0.78rem;
++		color: var(--color-text-secondary);
++		line-height: 1.5;
+ 		margin: 0;
+ 	}
+ 
+@@ -548,20 +584,49 @@
+ 
+ 	.feedback {
+ 		background: var(--color-surface-alt);
+-		border-radius: var(--radius-sm);
++		border: 1px solid var(--color-border);
++		border-radius: var(--radius-md);
+ 		padding: var(--space-3);
++		margin: 0;
++		font-size: 0.85rem;
++		line-height: 1.5;
+ 		color: var(--color-text-primary);
+ 	}
+ 
++	.retry-btn {
++		padding: var(--space-2) var(--space-3);
++		border-radius: var(--radius-md);
++		border: 1px solid var(--color-border);
++		background: var(--color-surface);
++		color: var(--color-text-primary);
++		font-size: 0.85rem;
++		font-weight: 600;
++		font-family: var(--font-body);
++		cursor: pointer;
++		min-height: 44px;
++	}
++
++	.retry-btn:hover {
++		border-color: var(--color-accent);
++	}
++
+ 	.complete-msg {
+ 		color: var(--color-success);
++		font-size: 0.85rem;
++		margin: 0;
+ 	}
+ 
++	/* No box of its own: the sidebar card already frames it */
+ 	.empty-state {
+-		background: var(--color-surface);
+-		border: 1px solid var(--color-border);
+-		border-radius: var(--radius-md);
+-		padding: var(--space-6);
+-		text-align: center;
++		display: flex;
++		flex-direction: column;
++		align-items: flex-start;
++		gap: var(--space-2);
++	}
++
++	.empty-state h2 {
++		margin: 0;
++		font-size: 1rem;
++		color: var(--color-text-primary);
+ 	}
+ </style>

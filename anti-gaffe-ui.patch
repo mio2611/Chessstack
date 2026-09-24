@@ -1,0 +1,266 @@
+diff --git a/src/routes/anti-gaffe/+page.svelte b/src/routes/anti-gaffe/+page.svelte
+index 054a285..d425697 100644
+--- a/src/routes/anti-gaffe/+page.svelte
++++ b/src/routes/anti-gaffe/+page.svelte
+@@ -161,7 +161,7 @@
+ 		} catch {
+ 			// Unlike a failed move, a failed grade here silently leaves this
+ 			// card's SR schedule stale — worth saying so, not staying quiet.
+-			feedback = "La note n'a pas pu être enregistrée (problème réseau). L'exercice suivant se charge quand même.";
++			feedback = 'The grade could not be saved (network problem). The next exercise is loading anyway.';
+ 		}
+ 		grading = false;
+ 		await fetchNextCard();
+@@ -238,21 +238,21 @@
+ 
+ 	<div class="sidebar">
+ 		{#if phase === 'loading'}
+-			<p>Chargement&hellip;</p>
++			<p class="setup-desc">Loading&hellip;</p>
+ 		{:else if phase === 'no-cards'}
+ 			<div class="empty-state">
+-				<h2>Rien à réviser pour l'instant</h2>
+-				<p>Toutes les positions anti-gaffe ont déjà été vues et aucune n'est due aujourd'hui.</p>
++				<h2>Nothing to review right now</h2>
++				<p class="setup-desc">All anti-gaffe positions have been seen and none are due today.</p>
+ 			</div>
+ 		{:else if phase === 'error'}
+ 			<div class="empty-state">
+-				<h2>Erreur</h2>
+-				<p>{errorMessage}</p>
+-				<button onclick={fetchNextCard}>Réessayer</button>
++				<h2>Error</h2>
++				<p class="setup-desc">{errorMessage}</p>
++				<button class="btn btn--secondary" onclick={fetchNextCard}>Retry</button>
+ 			</div>
+ 		{:else if card}
+-			<div class="position-info">
+-				<h2>Quel est le meilleur coup ?</h2>
++			<div class="sidebar-header">
++				<h2>What is the best move?</h2>
+ 			</div>
+ 
+ 			{#if feedback}
+@@ -260,13 +260,13 @@
+ 			{/if}
+ 
+ 			{#if phase === 'playing'}
+-				<p class="hint">Jouez le coup sur l'échiquier.</p>
++				<p class="setup-desc">Play the move on the board.</p>
+ 			{:else if phase === 'correct'}
+ 				<div class="feedback feedback--correct">
+ 					<span class="feedback-icon">✓</span> Correct
+ 				</div>
+ 				<div class="section">
+-					<div class="section-label">QUELLE ÉTAIT VOTRE CONFIANCE ?</div>
++					<div class="section-label">HOW CONFIDENT WAS YOUR RESPONSE?</div>
+ 					<div class="grade-buttons">
+ 						<button class="grade-btn grade-btn--forgot" onclick={() => submitGrade(1)} disabled={grading}>
+ 							<span class="grade-label">Forgot</span>
+@@ -293,13 +293,13 @@
+ 				</div>
+ 				{#if revealedSan}
+ 					<div class="section">
+-						<div class="section-label">COUP CORRECT</div>
++						<div class="section-label">CORRECT MOVE</div>
+ 						<div class="revealed-move">{revealedSan}</div>
+ 					</div>
+ 				{/if}
+-				<p class="auto-advance-hint">Sera noté Forgot</p>
++				<p class="auto-advance-hint">Will be graded as Forgot</p>
+ 				<button class="btn btn--primary next-btn" onclick={handleIncorrectNext} disabled={grading}>
+-					Suivant <kbd>Espace</kbd>
++					Next <kbd>Space</kbd>
+ 				</button>
+ 			{/if}
+ 		{/if}
+@@ -348,6 +348,11 @@
+ 		flex-direction: column;
+ 		gap: var(--space-4);
+ 		font-family: var(--font-body);
++		background: var(--color-card);
++		border: 1px solid var(--color-border);
++		border-radius: var(--radius-lg);
++		padding: var(--space-4);
++		box-shadow: var(--shadow-surface);
+ 	}
+ 
+ 	.flash-overlay {
+@@ -375,26 +380,27 @@
+ 		}
+ 	}
+ 
+-	.position-info {
+-		background: var(--color-surface);
+-		border: 1px solid var(--color-border);
+-		border-radius: var(--radius-md);
+-		padding: var(--space-4);
+-	}
+-
+-	.position-info h2 {
++	.sidebar-header h2 {
+ 		margin: 0;
++		font-size: 1rem;
+ 		color: var(--color-text-primary);
+ 	}
+ 
+-	.hint {
++	.setup-desc {
++		font-size: 0.78rem;
+ 		color: var(--color-text-secondary);
++		line-height: 1.5;
++		margin: 0;
+ 	}
+ 
+ 	.feedback {
+ 		background: var(--color-surface-alt);
+-		border-radius: var(--radius-sm);
++		border: 1px solid var(--color-border);
++		border-radius: var(--radius-md);
+ 		padding: var(--space-3);
++		margin: 0;
++		font-size: 0.85rem;
++		line-height: 1.5;
+ 		color: var(--color-text-primary);
+ 	}
+ 
+@@ -413,9 +419,12 @@
+ 	}
+ 
+ 	.section-label {
+-		font-size: 0.7rem;
+-		letter-spacing: 0.04em;
++		font-size: 11px;
++		font-family: var(--font-body);
++		font-weight: 700;
++		letter-spacing: 0.12em;
+ 		color: var(--color-text-muted);
++		text-transform: uppercase;
+ 	}
+ 
+ 	.grade-buttons {
+@@ -429,21 +438,51 @@
+ 		flex-direction: column;
+ 		align-items: center;
+ 		gap: 2px;
+-		padding: var(--space-2);
+-		border: 1px solid var(--color-border);
+-		border-radius: var(--radius-sm);
+-		background: var(--color-surface);
++		padding: var(--space-3) var(--space-2);
++		border-radius: var(--radius-md);
++		border: 1px solid transparent;
++		font-size: 0.8rem;
++		font-family: var(--font-body);
++		font-weight: 700;
+ 		cursor: pointer;
++		transition: filter var(--dur-fast) var(--ease-snap);
+ 	}
+ 
+ 	.grade-label {
+ 		font-size: 0.8rem;
+-		color: var(--color-text-primary);
+ 	}
+ 
+ 	.grade-interval {
+-		font-size: 0.7rem;
+-		color: var(--color-text-muted);
++		font-size: 0.65rem;
++		font-weight: 500;
++		opacity: 0.75;
++	}
++
++	.grade-btn:disabled {
++		opacity: 0.5;
++		cursor: default;
++	}
++
++	.grade-btn:not(:disabled):hover {
++		filter: brightness(1.15);
++	}
++
++	.grade-btn--forgot {
++		background: rgba(248, 113, 113, 0.18);
++		border-color: rgba(248, 113, 113, 0.45);
++		color: var(--color-danger);
++	}
++
++	.grade-btn--unsure {
++		background: rgba(91, 127, 164, 0.15);
++		border-color: rgba(91, 127, 164, 0.4);
++		color: var(--color-accent);
++	}
++
++	.grade-btn--easy {
++		background: rgba(74, 222, 128, 0.18);
++		border-color: rgba(74, 222, 128, 0.45);
++		color: var(--color-success);
+ 	}
+ 
+ 	.shortcut-hints {
+@@ -462,13 +501,61 @@
+ 	.auto-advance-hint {
+ 		color: var(--color-text-muted);
+ 		font-size: 0.8rem;
++		margin: 0;
+ 	}
+ 
+-	.empty-state {
++	.btn {
++		display: block;
++		text-align: center;
++		padding: var(--space-2) var(--space-4);
++		border-radius: var(--radius-md);
++		font-size: 0.85rem;
++		font-family: var(--font-body);
++		font-weight: 600;
++		cursor: pointer;
++		border: 1px solid transparent;
++		transition: filter var(--dur-fast) var(--ease-snap);
++	}
++
++	.btn:hover:not(:disabled) {
++		filter: brightness(1.15);
++	}
++
++	.btn--primary {
++		background: var(--color-accent);
++		border-color: var(--color-accent);
++		color: var(--color-base);
++	}
++
++	.btn--secondary {
+ 		background: var(--color-surface);
++		border-color: var(--color-border);
++		color: var(--color-text-secondary);
++	}
++
++	kbd {
++		display: inline-block;
++		padding: 0.05rem 0.3rem;
+ 		border: 1px solid var(--color-border);
+-		border-radius: var(--radius-md);
+-		padding: var(--space-6);
+-		text-align: center;
++		border-radius: var(--radius-sm);
++		background: var(--color-surface);
++		color: var(--color-text-muted);
++		font-size: 0.65rem;
++		font-family: var(--font-body);
++		line-height: 1.4;
++	}
++
++	/* No box of its own: the sidebar card already frames it */
++	.empty-state {
++		display: flex;
++		flex-direction: column;
++		align-items: flex-start;
++		gap: var(--space-2);
++	}
++
++	.empty-state h2 {
++		margin: 0;
++		font-size: 1rem;
++		color: var(--color-text-primary);
+ 	}
+ </style>
