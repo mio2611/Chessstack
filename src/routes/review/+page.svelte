@@ -35,7 +35,11 @@
 	import type { Key } from '@lichess-org/chessground/types';
 	import { Chess } from 'chess.js';
 	import { STARTING_FEN, fenKey } from '$lib/fen';
-	import { evaluatePosition, evaluatePositionMultiPv, type MultiPvLine } from '$lib/client/stockfish';
+	import {
+		evaluatePosition,
+		evaluatePositionMultiPv,
+		type MultiPvLine
+	} from '$lib/client/stockfish';
 	import { evaluateGame } from '$lib/client/gameEval';
 	import { scanGameForAntiGaffe } from '$lib/client/antiGaffeScan';
 
@@ -1755,8 +1759,7 @@
 									{#if game.antiGaffeScannedAt}
 										<span class="import-badge import-badge--scanned">Blunders: scanned</span>
 									{:else}
-										<span class="import-badge import-badge--not-scanned"
-											>Blunders: not scanned</span
+										<span class="import-badge import-badge--not-scanned">Blunders: not scanned</span
 										>
 									{/if}
 									{#if game.status === 'pending'}
@@ -2026,359 +2029,268 @@
 			{#if activeTab === 'deviation'}
 				<!-- Issues section -->
 				<div class="section-label">
-				{#if overrideRepertoireId === null || analysis.issues.length === 0}
-					ANALYSIS
+					{#if overrideRepertoireId === null || analysis.issues.length === 0}
+						ANALYSIS
+					{:else}
+						ISSUES ({analysis.issues.length})
+					{/if}
+				</div>
+
+				{#if overrideRepertoireId === null}
+					<div class="no-issues">
+						<p class="no-issues-title">No matching repertoire</p>
+						<p class="no-issues-hint">
+							This game's opening doesn't match any of your repertoires, so deviation analysis isn't
+							available for it. The Blunders tab works independently of this.
+						</p>
+					</div>
+				{:else if analysis.issues.length === 0}
+					<div class="no-issues">
+						<div class="no-issues-icon">✓</div>
+						<p class="no-issues-title">No deviations found!</p>
+						<p class="no-issues-hint">Your opening was perfectly on book.</p>
+					</div>
 				{:else}
-					ISSUES ({analysis.issues.length})
-				{/if}
-			</div>
+					<div class="issues-list">
+						{#each analysis.issues as issue (issue.ply)}
+							{@const isResolved = resolvedIssues.has(issue.ply)}
+							{@const isLoading = actionLoading.get(issue.ply) ?? false}
+							{@const isActive = currentPlyIdx === issue.ply}
+							{@const chainLeg = chainExtensions.get(issue.ply) ?? null}
 
-			{#if overrideRepertoireId === null}
-				<div class="no-issues">
-					<p class="no-issues-title">No matching repertoire</p>
-					<p class="no-issues-hint">
-						This game's opening doesn't match any of your repertoires, so deviation analysis
-						isn't available for it. The Blunders tab works independently of this.
-					</p>
-				</div>
-			{:else if analysis.issues.length === 0}
-				<div class="no-issues">
-					<div class="no-issues-icon">✓</div>
-					<p class="no-issues-title">No deviations found!</p>
-					<p class="no-issues-hint">Your opening was perfectly on book.</p>
-				</div>
-			{:else}
-				<div class="issues-list">
-					{#each analysis.issues as issue (issue.ply)}
-						{@const isResolved = resolvedIssues.has(issue.ply)}
-						{@const isLoading = actionLoading.get(issue.ply) ?? false}
-						{@const isActive = currentPlyIdx === issue.ply}
-						{@const chainLeg = chainExtensions.get(issue.ply) ?? null}
-
-						<div
-							class="issue-card"
-							class:issue-deviation={issue.type === 'DEVIATION'}
-							class:issue-beyond={issue.type === 'BEYOND_REPERTOIRE'}
-							class:issue-surprise={issue.type === 'OPPONENT_SURPRISE'}
-							class:issue-resolved={isResolved}
-							class:issue-active={isActive}
-						>
-							<!-- Header — click to jump board to this position -->
-							<button class="issue-header" onclick={() => jumpToIssue(issue)}>
-								<span class="issue-type-label">
-									{#if issue.type === 'DEVIATION'}⚠{:else if issue.type === 'BEYOND_REPERTOIRE'}↗{:else}?{/if}
-								</span>
-								<span class="issue-move-num">Move {Math.ceil(issue.ply / 2)}</span>
-								<span class="issue-san-played">{issue.playedSan}</span>
-								{#if isResolved}
-									<span class="resolved-mark">✓</span>
-								{/if}
-							</button>
-
-							<!-- Details + actions (only if not resolved) -->
-							{#if !isResolved}
-								{#if chainLeg}
-									<!-- ── Chain extension phases ─────────────────────────────────── -->
-									<!-- Phase A: ask whether to add the next opponent move.         -->
-									<!-- Phase B: opponent added — pick a response.                  -->
-									{#if !chainLeg.opponentAdded}
-										<div class="issue-details">
-											<span
-												>Keep building? Opponent would play <strong>{chainLeg.opponentSan}</strong
-												></span
-											>
-										</div>
-										<div class="issue-actions">
-											<button
-												class="act-btn act-btn--primary"
-												onclick={() => handleChainAddOpponent(issue.ply)}
-												disabled={isLoading}
-											>
-												Add opponent's {chainLeg.opponentSan}
-											</button>
-											<button
-												class="act-btn act-btn--ghost"
-												onclick={() => skipChain(issue.ply)}
-												disabled={isLoading}
-											>
-												Done
-											</button>
-										</div>
-									{:else if chainLeg.userFen}
-										{#if chainLeg.transposition}
-											<!-- Transposition: this position is already in the repertoire -->
-											<div class="issue-details">
-												<span class="transposition-label">Transposition</span>
-												{#if chainLeg.transposition.userPlayedCorrect}
-													<span
-														>This position is already in your repertoire. You played <strong
-															>{chainLeg.userSan}</strong
-														> — the correct move.</span
-													>
-												{:else}
-													<span
-														>This position is already in your repertoire (book: <strong
-															>{chainLeg.transposition.existingSan}</strong
-														>). You played <strong>{chainLeg.userSan}</strong>.</span
-													>
-												{/if}
-											</div>
-											<div class="issue-actions">
-												{#if chainLeg.transposition.userPlayedCorrect}
-													<button
-														class="act-btn act-btn--primary"
-														onclick={() => skipChain(issue.ply)}
-														disabled={isLoading}
-													>
-														Done
-													</button>
-													<button
-														class="act-btn act-btn--ghost"
-														onclick={() => handleTranspositionReplace(issue.ply)}
-														disabled={isLoading}
-														title="Replace the existing repertoire path to this position with the path from this game"
-													>
-														Replace path in tree
-													</button>
-												{:else}
-													<button
-														class="act-btn act-btn--warn"
-														onclick={() => handleTranspositionFailCard(issue.ply)}
-														disabled={isLoading}
-													>
-														Fail card
-													</button>
-													<button
-														class="act-btn act-btn--warn"
-														onclick={() => handleTranspositionReplace(issue.ply)}
-														disabled={isLoading}
-														title="Replace the existing repertoire move with what you played in this game"
-													>
-														Replace with {chainLeg.userSan}
-													</button>
-													<button
-														class="act-btn act-btn--ghost"
-														onclick={() => skipChain(issue.ply)}
-														disabled={isLoading}
-													>
-														Skip
-													</button>
-												{/if}
-											</div>
-										{:else}
-											<!-- Normal chain phase B — pick a response -->
-											<div class="issue-details">
-												<span
-													><strong>{chainLeg.opponentSan}</strong> added. Pick your response:</span
-												>
-											</div>
-											<div class="issue-picker-wrap">
-												<ReviewIssuePicker
-													fen={chainLeg.userFen}
-													playerColor={analysedPlayerColor}
-													gameMoveSan={chainLeg.userSan}
-													gameMoveEvalCp={positionEvals.get(chainLeg.plyInGame + 1)?.evalCp ?? null}
-													cplClass={getCplClassForPly(chainLeg.plyInGame + 1)}
-													onSelectMove={(san) => handlePickChainResponse(issue.ply, san)}
-													onHoverMove={(san) => handleHoverMove(chainLeg.userFen ?? '', san)}
-													onSkip={() => skipChain(issue.ply)}
-													disabled={isLoading}
-													loading={isLoading}
-												/>
-											</div>
-										{/if}
+							<div
+								class="issue-card"
+								class:issue-deviation={issue.type === 'DEVIATION'}
+								class:issue-beyond={issue.type === 'BEYOND_REPERTOIRE'}
+								class:issue-surprise={issue.type === 'OPPONENT_SURPRISE'}
+								class:issue-resolved={isResolved}
+								class:issue-active={isActive}
+							>
+								<!-- Header — click to jump board to this position -->
+								<button class="issue-header" onclick={() => jumpToIssue(issue)}>
+									<span class="issue-type-label">
+										{#if issue.type === 'DEVIATION'}⚠{:else if issue.type === 'BEYOND_REPERTOIRE'}↗{:else}?{/if}
+									</span>
+									<span class="issue-move-num">Move {Math.ceil(issue.ply / 2)}</span>
+									<span class="issue-san-played">{issue.playedSan}</span>
+									{#if isResolved}
+										<span class="resolved-mark">✓</span>
 									{/if}
-								{:else}
-									<!-- ── Original issue phases ──────────────────────────────────── -->
+								</button>
 
-									{#if issue.type === 'DEVIATION'}
-										{@const ev = deviationEvals.get(issue.ply)}
-										<!-- DEVIATION: eval comparison + simple action buttons -->
-										<div class="issue-details">
-											<div class="eval-compare">
-												<div class="eval-row">
-													<span class="eval-label">Played</span>
-													<strong class="eval-san">{issue.playedSan}</strong>
-													{#if ev?.played != null}
-														<span class="eval-badge {evalBadgeClass(ev.played)}"
-															>{formatEval(ev.played)}</span
-														>
-													{:else}
-														<span class="eval-badge eval-loading">…</span>
-													{/if}
-												</div>
-												<div class="eval-row">
-													<span class="eval-label">Book</span>
-													<strong class="eval-san">{issue.repertoireSan}</strong>
-													{#if ev?.correct != null}
-														<span class="eval-badge {evalBadgeClass(ev.correct)}"
-															>{formatEval(ev.correct)}</span
-														>
-													{:else}
-														<span class="eval-badge eval-loading">…</span>
-													{/if}
-												</div>
-											</div>
-											<button
-												type="button"
-												class="masters-toggle"
-												onclick={() => toggleMasters(issue)}
-											>
-												{deviationMastersExpanded.has(issue.ply) ? '▾' : '▸'} Masters
-											</button>
-											{#if deviationMastersExpanded.has(issue.ply)}
-												{@const masters = deviationMasters.get(issue.ply)}
-												{@const mLoading = deviationMastersLoading.get(issue.ply)}
-												{@const mError = deviationMastersError.get(issue.ply)}
-												{#if mLoading}
-													<div class="masters-inline-loading">Loading masters…</div>
-												{:else if mError}
-													<div class="masters-inline-error">Masters unavailable</div>
-												{:else if masters && masters.length > 0}
-													<div class="masters-mini-list">
-														{#each masters as m (m.san)}
-															{@const winPct =
-																m.totalGames > 0 ? (m.white / m.totalGames) * 100 : 0}
-															{@const drawPct =
-																m.totalGames > 0 ? (m.draws / m.totalGames) * 100 : 0}
-															{@const lossPct =
-																m.totalGames > 0 ? (m.black / m.totalGames) * 100 : 0}
-															<div class="masters-mini-row">
-																<span
-																	class="masters-mini-san"
-																	class:masters-mini-highlight={m.san === issue.playedSan}
-																	class:masters-mini-book={m.san === issue.repertoireSan}
-																	>{m.san}</span
-																>
-																<div class="wdl-bar-mini">
-																	<div class="wdl-w" style="width: {winPct}%"></div>
-																	<div class="wdl-d" style="width: {drawPct}%"></div>
-																	<div class="wdl-b" style="width: {lossPct}%"></div>
-																</div>
-																<span class="masters-mini-count"
-																	>{m.totalGames.toLocaleString()}</span
-																>
-															</div>
-														{/each}
-													</div>
-												{:else if masters}
-													<div class="masters-inline-error">No master games here</div>
-												{/if}
-											{/if}
-										</div>
-										{@const devEv = deviationEvals.get(issue.ply)}
-										{@const playedBetter =
-											devEv?.played != null &&
-											devEv?.correct != null &&
-											(analysedPlayerColor === 'BLACK' ? -devEv.played : devEv.played) >
-												(analysedPlayerColor === 'BLACK' ? -devEv.correct : devEv.correct)}
-										<div class="issue-actions">
-											<button
-												class="act-btn act-btn--warn"
-												onclick={() => handleFailCard(issue)}
-												disabled={isLoading}
-											>
-												Fail card
-											</button>
-											<button
-												class="act-btn {playedBetter ? 'act-btn--primary' : 'act-btn--warn'}"
-												onclick={() => handleUpdateRepertoire(issue)}
-												disabled={isLoading}
-											>
-												{playedBetter ? 'Replace in repertoire' : 'Update repertoire'}
-											</button>
-											<button
-												class="act-btn act-btn--ghost"
-												onclick={() => resolveIssue(issue.ply)}
-												disabled={isLoading}
-											>
-												Skip
-											</button>
-										</div>
-									{:else if issue.type === 'BEYOND_REPERTOIRE'}
-										<!-- BEYOND_REPERTOIRE: tabbed move picker -->
-										<div class="issue-details">
-											<span
-												>You played <strong>{issue.playedSan}</strong> — no repertoire move here. Pick
-												a move to add:</span
-											>
-										</div>
-										<div class="issue-picker-wrap">
-											<ReviewIssuePicker
-												fen={issue.fromFen}
-												playerColor={analysedPlayerColor}
-												gameMoveSan={issue.playedSan}
-												gameMoveEvalCp={positionEvals.get(issue.ply)?.evalCp ?? null}
-												cplClass={getCplClassForPly(issue.ply)}
-												onSelectMove={(san) => handlePickResponseMove(issue, san)}
-												onHoverMove={(san) => handleHoverMove(issue.fromFen, san)}
-												onSkip={() => resolveIssue(issue.ply)}
-												disabled={isLoading}
-												loading={isLoading}
-											/>
-										</div>
-									{:else if issue.type === 'OPPONENT_SURPRISE'}
-										{#if !opponentMoveAdded.has(issue.ply)}
-											<!-- Phase 1: decide whether to add the opponent's move -->
+								<!-- Details + actions (only if not resolved) -->
+								{#if !isResolved}
+									{#if chainLeg}
+										<!-- ── Chain extension phases ─────────────────────────────────── -->
+										<!-- Phase A: ask whether to add the next opponent move.         -->
+										<!-- Phase B: opponent added — pick a response.                  -->
+										{#if !chainLeg.opponentAdded}
 											<div class="issue-details">
 												<span
-													>Opponent played <strong>{issue.playedSan}</strong> (not in your repertoire)</span
+													>Keep building? Opponent would play <strong>{chainLeg.opponentSan}</strong
+													></span
 												>
 											</div>
 											<div class="issue-actions">
 												<button
 													class="act-btn act-btn--primary"
-													onclick={() => handleAddOpponentMove(issue)}
+													onclick={() => handleChainAddOpponent(issue.ply)}
 													disabled={isLoading}
 												>
-													Add to repertoire
+													Add opponent's {chainLeg.opponentSan}
 												</button>
-												{#if newRepIssuePly === issue.ply}
-													<form
-														class="new-rep-inline"
-														onsubmit={(e) => {
-															e.preventDefault();
-															handleAddOpponentMoveNewRep(issue);
-														}}
+												<button
+													class="act-btn act-btn--ghost"
+													onclick={() => skipChain(issue.ply)}
+													disabled={isLoading}
+												>
+													Done
+												</button>
+											</div>
+										{:else if chainLeg.userFen}
+											{#if chainLeg.transposition}
+												<!-- Transposition: this position is already in the repertoire -->
+												<div class="issue-details">
+													<span class="transposition-label">Transposition</span>
+													{#if chainLeg.transposition.userPlayedCorrect}
+														<span
+															>This position is already in your repertoire. You played <strong
+																>{chainLeg.userSan}</strong
+															> — the correct move.</span
+														>
+													{:else}
+														<span
+															>This position is already in your repertoire (book: <strong
+																>{chainLeg.transposition.existingSan}</strong
+															>). You played <strong>{chainLeg.userSan}</strong>.</span
+														>
+													{/if}
+												</div>
+												<div class="issue-actions">
+													{#if chainLeg.transposition.userPlayedCorrect}
+														<button
+															class="act-btn act-btn--primary"
+															onclick={() => skipChain(issue.ply)}
+															disabled={isLoading}
+														>
+															Done
+														</button>
+														<button
+															class="act-btn act-btn--ghost"
+															onclick={() => handleTranspositionReplace(issue.ply)}
+															disabled={isLoading}
+															title="Replace the existing repertoire path to this position with the path from this game"
+														>
+															Replace path in tree
+														</button>
+													{:else}
+														<button
+															class="act-btn act-btn--warn"
+															onclick={() => handleTranspositionFailCard(issue.ply)}
+															disabled={isLoading}
+														>
+															Fail card
+														</button>
+														<button
+															class="act-btn act-btn--warn"
+															onclick={() => handleTranspositionReplace(issue.ply)}
+															disabled={isLoading}
+															title="Replace the existing repertoire move with what you played in this game"
+														>
+															Replace with {chainLeg.userSan}
+														</button>
+														<button
+															class="act-btn act-btn--ghost"
+															onclick={() => skipChain(issue.ply)}
+															disabled={isLoading}
+														>
+															Skip
+														</button>
+													{/if}
+												</div>
+											{:else}
+												<!-- Normal chain phase B — pick a response -->
+												<div class="issue-details">
+													<span
+														><strong>{chainLeg.opponentSan}</strong> added. Pick your response:</span
 													>
-														<input
-															type="text"
-															class="new-rep-input"
-															placeholder="Repertoire name"
-															bind:value={newRepName}
-															disabled={isLoading}
-														/>
-														<button
-															type="submit"
-															class="act-btn act-btn--primary act-btn--sm"
-															disabled={isLoading || !newRepName.trim()}
-														>
-															Create
-														</button>
-														<button
-															type="button"
-															class="act-btn act-btn--ghost act-btn--sm"
-															onclick={() => {
-																newRepIssuePly = null;
-																newRepName = '';
-															}}
-															disabled={isLoading}
-														>
-															Cancel
-														</button>
-													</form>
-												{:else}
-													<button
-														class="act-btn act-btn--secondary"
-														onclick={() => {
-															newRepIssuePly = issue.ply;
-															newRepName = '';
-														}}
+												</div>
+												<div class="issue-picker-wrap">
+													<ReviewIssuePicker
+														fen={chainLeg.userFen}
+														playerColor={analysedPlayerColor}
+														gameMoveSan={chainLeg.userSan}
+														gameMoveEvalCp={positionEvals.get(chainLeg.plyInGame + 1)?.evalCp ??
+															null}
+														cplClass={getCplClassForPly(chainLeg.plyInGame + 1)}
+														onSelectMove={(san) => handlePickChainResponse(issue.ply, san)}
+														onHoverMove={(san) => handleHoverMove(chainLeg.userFen ?? '', san)}
+														onSkip={() => skipChain(issue.ply)}
 														disabled={isLoading}
-													>
-														Add to new repertoire
-													</button>
+														loading={isLoading}
+													/>
+												</div>
+											{/if}
+										{/if}
+									{:else}
+										<!-- ── Original issue phases ──────────────────────────────────── -->
+
+										{#if issue.type === 'DEVIATION'}
+											{@const ev = deviationEvals.get(issue.ply)}
+											<!-- DEVIATION: eval comparison + simple action buttons -->
+											<div class="issue-details">
+												<div class="eval-compare">
+													<div class="eval-row">
+														<span class="eval-label">Played</span>
+														<strong class="eval-san">{issue.playedSan}</strong>
+														{#if ev?.played != null}
+															<span class="eval-badge {evalBadgeClass(ev.played)}"
+																>{formatEval(ev.played)}</span
+															>
+														{:else}
+															<span class="eval-badge eval-loading">…</span>
+														{/if}
+													</div>
+													<div class="eval-row">
+														<span class="eval-label">Book</span>
+														<strong class="eval-san">{issue.repertoireSan}</strong>
+														{#if ev?.correct != null}
+															<span class="eval-badge {evalBadgeClass(ev.correct)}"
+																>{formatEval(ev.correct)}</span
+															>
+														{:else}
+															<span class="eval-badge eval-loading">…</span>
+														{/if}
+													</div>
+												</div>
+												<button
+													type="button"
+													class="masters-toggle"
+													onclick={() => toggleMasters(issue)}
+												>
+													{deviationMastersExpanded.has(issue.ply) ? '▾' : '▸'} Masters
+												</button>
+												{#if deviationMastersExpanded.has(issue.ply)}
+													{@const masters = deviationMasters.get(issue.ply)}
+													{@const mLoading = deviationMastersLoading.get(issue.ply)}
+													{@const mError = deviationMastersError.get(issue.ply)}
+													{#if mLoading}
+														<div class="masters-inline-loading">Loading masters…</div>
+													{:else if mError}
+														<div class="masters-inline-error">Masters unavailable</div>
+													{:else if masters && masters.length > 0}
+														<div class="masters-mini-list">
+															{#each masters as m (m.san)}
+																{@const winPct =
+																	m.totalGames > 0 ? (m.white / m.totalGames) * 100 : 0}
+																{@const drawPct =
+																	m.totalGames > 0 ? (m.draws / m.totalGames) * 100 : 0}
+																{@const lossPct =
+																	m.totalGames > 0 ? (m.black / m.totalGames) * 100 : 0}
+																<div class="masters-mini-row">
+																	<span
+																		class="masters-mini-san"
+																		class:masters-mini-highlight={m.san === issue.playedSan}
+																		class:masters-mini-book={m.san === issue.repertoireSan}
+																		>{m.san}</span
+																	>
+																	<div class="wdl-bar-mini">
+																		<div class="wdl-w" style="width: {winPct}%"></div>
+																		<div class="wdl-d" style="width: {drawPct}%"></div>
+																		<div class="wdl-b" style="width: {lossPct}%"></div>
+																	</div>
+																	<span class="masters-mini-count"
+																		>{m.totalGames.toLocaleString()}</span
+																	>
+																</div>
+															{/each}
+														</div>
+													{:else if masters}
+														<div class="masters-inline-error">No master games here</div>
+													{/if}
 												{/if}
+											</div>
+											{@const devEv = deviationEvals.get(issue.ply)}
+											{@const playedBetter =
+												devEv?.played != null &&
+												devEv?.correct != null &&
+												(analysedPlayerColor === 'BLACK' ? -devEv.played : devEv.played) >
+													(analysedPlayerColor === 'BLACK' ? -devEv.correct : devEv.correct)}
+											<div class="issue-actions">
+												<button
+													class="act-btn act-btn--warn"
+													onclick={() => handleFailCard(issue)}
+													disabled={isLoading}
+												>
+													Fail card
+												</button>
+												<button
+													class="act-btn {playedBetter ? 'act-btn--primary' : 'act-btn--warn'}"
+													onclick={() => handleUpdateRepertoire(issue)}
+													disabled={isLoading}
+												>
+													{playedBetter ? 'Replace in repertoire' : 'Update repertoire'}
+												</button>
 												<button
 													class="act-btn act-btn--ghost"
 													onclick={() => resolveIssue(issue.ply)}
@@ -2387,174 +2299,266 @@
 													Skip
 												</button>
 											</div>
-										{:else}
-											<!-- Phase 2: opponent added — pick your response via tabbed panel -->
+										{:else if issue.type === 'BEYOND_REPERTOIRE'}
+											<!-- BEYOND_REPERTOIRE: tabbed move picker -->
 											<div class="issue-details">
-												<span>Added <strong>{issue.playedSan}</strong>. Pick your response:</span>
+												<span
+													>You played <strong>{issue.playedSan}</strong> — no repertoire move here. Pick
+													a move to add:</span
+												>
 											</div>
 											<div class="issue-picker-wrap">
 												<ReviewIssuePicker
-													fen={issue.toFen}
+													fen={issue.fromFen}
 													playerColor={analysedPlayerColor}
-													gameMoveSan={issue.userResponseSan}
-													gameMoveEvalCp={positionEvals.get(issue.ply + 1)?.evalCp ?? null}
-													cplClass={getCplClassForPly(issue.ply + 1)}
+													gameMoveSan={issue.playedSan}
+													gameMoveEvalCp={positionEvals.get(issue.ply)?.evalCp ?? null}
+													cplClass={getCplClassForPly(issue.ply)}
 													onSelectMove={(san) => handlePickResponseMove(issue, san)}
-													onHoverMove={(san) => handleHoverMove(issue.toFen, san)}
+													onHoverMove={(san) => handleHoverMove(issue.fromFen, san)}
 													onSkip={() => resolveIssue(issue.ply)}
 													disabled={isLoading}
 													loading={isLoading}
 												/>
 											</div>
+										{:else if issue.type === 'OPPONENT_SURPRISE'}
+											{#if !opponentMoveAdded.has(issue.ply)}
+												<!-- Phase 1: decide whether to add the opponent's move -->
+												<div class="issue-details">
+													<span
+														>Opponent played <strong>{issue.playedSan}</strong> (not in your repertoire)</span
+													>
+												</div>
+												<div class="issue-actions">
+													<button
+														class="act-btn act-btn--primary"
+														onclick={() => handleAddOpponentMove(issue)}
+														disabled={isLoading}
+													>
+														Add to repertoire
+													</button>
+													{#if newRepIssuePly === issue.ply}
+														<form
+															class="new-rep-inline"
+															onsubmit={(e) => {
+																e.preventDefault();
+																handleAddOpponentMoveNewRep(issue);
+															}}
+														>
+															<input
+																type="text"
+																class="new-rep-input"
+																placeholder="Repertoire name"
+																bind:value={newRepName}
+																disabled={isLoading}
+															/>
+															<button
+																type="submit"
+																class="act-btn act-btn--primary act-btn--sm"
+																disabled={isLoading || !newRepName.trim()}
+															>
+																Create
+															</button>
+															<button
+																type="button"
+																class="act-btn act-btn--ghost act-btn--sm"
+																onclick={() => {
+																	newRepIssuePly = null;
+																	newRepName = '';
+																}}
+																disabled={isLoading}
+															>
+																Cancel
+															</button>
+														</form>
+													{:else}
+														<button
+															class="act-btn act-btn--secondary"
+															onclick={() => {
+																newRepIssuePly = issue.ply;
+																newRepName = '';
+															}}
+															disabled={isLoading}
+														>
+															Add to new repertoire
+														</button>
+													{/if}
+													<button
+														class="act-btn act-btn--ghost"
+														onclick={() => resolveIssue(issue.ply)}
+														disabled={isLoading}
+													>
+														Skip
+													</button>
+												</div>
+											{:else}
+												<!-- Phase 2: opponent added — pick your response via tabbed panel -->
+												<div class="issue-details">
+													<span>Added <strong>{issue.playedSan}</strong>. Pick your response:</span>
+												</div>
+												<div class="issue-picker-wrap">
+													<ReviewIssuePicker
+														fen={issue.toFen}
+														playerColor={analysedPlayerColor}
+														gameMoveSan={issue.userResponseSan}
+														gameMoveEvalCp={positionEvals.get(issue.ply + 1)?.evalCp ?? null}
+														cplClass={getCplClassForPly(issue.ply + 1)}
+														onSelectMove={(san) => handlePickResponseMove(issue, san)}
+														onHoverMove={(san) => handleHoverMove(issue.toFen, san)}
+														onSkip={() => resolveIssue(issue.ply)}
+														disabled={isLoading}
+														loading={isLoading}
+													/>
+												</div>
+											{/if}
 										{/if}
 									{/if}
 								{/if}
-							{/if}
-							{#if actionError.has(issue.ply)}
-								<div class="action-error">{actionError.get(issue.ply)}</div>
-							{/if}
-						</div>
-					{/each}
-				</div>
-			{/if}
+								{#if actionError.has(issue.ply)}
+									<div class="action-error">{actionError.get(issue.ply)}</div>
+								{/if}
+							</div>
+						{/each}
+					</div>
+				{/if}
 
-			<!-- Notes + save — meaningless without a repertoire, since there is
+				<!-- Notes + save — meaningless without a repertoire, since there is
 			     nothing to save a deviation review against. -->
-			{#if overrideRepertoireId !== null}
-				<div class="save-section">
-					<textarea
-						class="notes-input"
-						rows="3"
-						placeholder="Notes about this game…"
-						bind:value={notes}
-					></textarea>
-					<button class="btn btn--primary btn--full" onclick={saveReview} disabled={saving}>
-					{saving ? 'Saving…' : 'Save Review'}
-				</button>
-			</div>
-			{/if}
-		{:else}
-			<!-- Anti-gaffe panel: fully independent of the Deviation panel
+				{#if overrideRepertoireId !== null}
+					<div class="save-section">
+						<textarea
+							class="notes-input"
+							rows="3"
+							placeholder="Notes about this game…"
+							bind:value={notes}
+						></textarea>
+						<button class="btn btn--primary btn--full" onclick={saveReview} disabled={saving}>
+							{saving ? 'Saving…' : 'Save Review'}
+						</button>
+					</div>
+				{/if}
+			{:else}
+				<!-- Anti-gaffe panel: fully independent of the Deviation panel
 			     above — its own trigger, its own state, no repertoire
 			     involved anywhere in this branch. -->
-			{#if antiGaffeScanProgress}
-				<div class="eval-progress">
-					<div
-						class="eval-progress-bar"
-						style="width: {(antiGaffeScanProgress.done / antiGaffeScanProgress.total) * 100}%"
-					></div>
-					<span class="eval-progress-text"
-						>Scanning {antiGaffeScanProgress.done}/{antiGaffeScanProgress.total}</span
-					>
-				</div>
-			{:else}
-				<button class="nav-btn analyze-btn" onclick={runAntiGaffeScan}>
-					▶ Scanner cette partie
-				</button>
-			{/if}
-
-			{#if antiGaffeCandidates.length === 0}
-				<div class="no-issues">
-					<p class="no-issues-title">No candidates yet</p>
-					<p class="no-issues-hint">
-						Run the scan to look for your own moves that lost 100cp or more.
-					</p>
-				</div>
-			{:else}
-				<div class="issues-list">
-					{#each antiGaffeCandidates as candidate (candidate.id)}
+				{#if antiGaffeScanProgress}
+					<div class="eval-progress">
 						<div
-						class="issue-card issue-anti-gaffe"
-						class:issue-active={currentPlyIdx === candidate.ply}
-					>
-							<button class="issue-header" onclick={() => jumpToAntiGaffeCandidate(candidate)}>
-								Ply {candidate.ply + 1} · {candidate.playedSan} · -{candidate.cpLoss}cp
-							</button>
-							{#if antiGaffeMultiPvCandidateId === candidate.id}
-								{#if antiGaffeMultiPvLoading}
-									<div class="multipv-loading">Analyzing…</div>
-								{:else if antiGaffeMultiPvLines}
-									<ul class="multipv-lines">
-										{#each antiGaffeMultiPvLines as line, i (line.moveUci)}
-											<li>
-												<button
-													class="multipv-line-btn"
-													onmouseenter={() => previewAntiGaffeMove(candidate.fen, line.moveUci)}
-													onmouseleave={clearAntiGaffePreview}
-													onclick={() => pickAntiGaffeSuggestion(candidate.id, line.moveSan)}
-												>
-													{i + 1}. {line.moveSan ?? line.moveUci}
-													{#if line.evalMate != null}
-														(#{line.evalMate})
-													{:else if line.evalCp != null}
-														({line.evalCp > 0 ? '+' : ''}{(line.evalCp / 100).toFixed(2)})
-													{/if}
-												</button>
-											</li>
-										{/each}
-									</ul>
+							class="eval-progress-bar"
+							style="width: {(antiGaffeScanProgress.done / antiGaffeScanProgress.total) * 100}%"
+						></div>
+						<span class="eval-progress-text"
+							>Scanning {antiGaffeScanProgress.done}/{antiGaffeScanProgress.total}</span
+						>
+					</div>
+				{:else}
+					<button class="nav-btn analyze-btn" onclick={runAntiGaffeScan}>
+						▶ Scanner cette partie
+					</button>
+				{/if}
+
+				{#if antiGaffeCandidates.length === 0}
+					<div class="no-issues">
+						<p class="no-issues-title">No candidates yet</p>
+						<p class="no-issues-hint">
+							Run the scan to look for your own moves that lost 100cp or more.
+						</p>
+					</div>
+				{:else}
+					<div class="issues-list">
+						{#each antiGaffeCandidates as candidate (candidate.id)}
+							<div
+								class="issue-card issue-anti-gaffe"
+								class:issue-active={currentPlyIdx === candidate.ply}
+							>
+								<button class="issue-header" onclick={() => jumpToAntiGaffeCandidate(candidate)}>
+									Ply {candidate.ply + 1} · {candidate.playedSan} · -{candidate.cpLoss}cp
+								</button>
+								{#if antiGaffeMultiPvCandidateId === candidate.id}
+									{#if antiGaffeMultiPvLoading}
+										<div class="multipv-loading">Analyzing…</div>
+									{:else if antiGaffeMultiPvLines}
+										<ul class="multipv-lines">
+											{#each antiGaffeMultiPvLines as line, i (line.moveUci)}
+												<li>
+													<button
+														class="multipv-line-btn"
+														onmouseenter={() => previewAntiGaffeMove(candidate.fen, line.moveUci)}
+														onmouseleave={clearAntiGaffePreview}
+														onclick={() => pickAntiGaffeSuggestion(candidate.id, line.moveSan)}
+													>
+														{i + 1}. {line.moveSan ?? line.moveUci}
+														{#if line.evalMate != null}
+															(#{line.evalMate})
+														{:else if line.evalCp != null}
+															({line.evalCp > 0 ? '+' : ''}{(line.evalCp / 100).toFixed(2)})
+														{/if}
+													</button>
+												</li>
+											{/each}
+										</ul>
+									{/if}
 								{/if}
-							{/if}
-							{#if candidate.status === 'pending'}
-								<label class="candidate-move-label">
-									Move to play:
-									<input
-										type="text"
-										class="notes-input"
-										bind:value={
-											() => antiGaffeMoveInputs.get(candidate.id) ?? '',
-											(v) => antiGaffeMoveInputs.set(candidate.id, v)
-										}
-									/>
-								</label>
-								{#if antiGaffeConflicts.has(candidate.id)}
-									<div class="action-error">
-										A card for this position already expects {antiGaffeConflicts.get(
-											candidate.id
-										)}.
-										<button
-											class="btn btn--sm"
-											onclick={() => acceptAntiGaffeCandidate(candidate, true)}
-											disabled={antiGaffeActionLoading.get(candidate.id)}
-										>
-											Replace it
-										</button>
-									</div>
+								{#if candidate.status === 'pending'}
+									<label class="candidate-move-label">
+										Move to play:
+										<input
+											type="text"
+											class="notes-input"
+											bind:value={
+												() => antiGaffeMoveInputs.get(candidate.id) ?? '',
+												(v) => antiGaffeMoveInputs.set(candidate.id, v)
+											}
+										/>
+									</label>
+									{#if antiGaffeConflicts.has(candidate.id)}
+										<div class="action-error">
+											A card for this position already expects {antiGaffeConflicts.get(
+												candidate.id
+											)}.
+											<button
+												class="btn btn--sm"
+												onclick={() => acceptAntiGaffeCandidate(candidate, true)}
+												disabled={antiGaffeActionLoading.get(candidate.id)}
+											>
+												Replace it
+											</button>
+										</div>
+									{:else}
+										<div class="issue-actions">
+											<button
+												class="btn btn--sm btn--primary"
+												onclick={() => acceptAntiGaffeCandidate(candidate)}
+												disabled={antiGaffeActionLoading.get(candidate.id)}
+											>
+												Accept
+											</button>
+											<button
+												class="btn btn--sm btn--ghost"
+												onclick={() => rejectAntiGaffeCandidate(candidate.id)}
+												disabled={antiGaffeActionLoading.get(candidate.id)}
+											>
+												Reject
+											</button>
+										</div>
+									{/if}
 								{:else}
-									<div class="issue-actions">
-										<button
-											class="btn btn--sm btn--primary"
-											onclick={() => acceptAntiGaffeCandidate(candidate)}
-											disabled={antiGaffeActionLoading.get(candidate.id)}
-										>
-											Accept
-										</button>
+									<div class="issue-status">
+										{candidate.status}
 										<button
 											class="btn btn--sm btn--ghost"
-											onclick={() => rejectAntiGaffeCandidate(candidate.id)}
+											onclick={() => undoAntiGaffeCandidate(candidate.id)}
 											disabled={antiGaffeActionLoading.get(candidate.id)}
 										>
-											Reject
+											Undo
 										</button>
 									</div>
 								{/if}
-							{:else}
-								<div class="issue-status">
-									{candidate.status}
-									<button
-										class="btn btn--sm btn--ghost"
-										onclick={() => undoAntiGaffeCandidate(candidate.id)}
-										disabled={antiGaffeActionLoading.get(candidate.id)}
-									>
-										Undo
-									</button>
-								</div>
-							{/if}
-						</div>
-					{/each}
-				</div>
+							</div>
+						{/each}
+					</div>
+				{/if}
 			{/if}
-		{/if}
 		</div>
 	</div>
 

@@ -69,7 +69,9 @@ export const GET: RequestHandler = async ({ locals, url }) => {
 	}
 
 	const gameColumn =
-		gameSource === 'imported' ? antiGaffeCandidate.importedGameId : antiGaffeCandidate.reviewedGameId;
+		gameSource === 'imported'
+			? antiGaffeCandidate.importedGameId
+			: antiGaffeCandidate.reviewedGameId;
 
 	const conditions = [eq(gameColumn, gameId)];
 	if (status) conditions.push(eq(antiGaffeCandidate.status, status));
@@ -151,7 +153,9 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 	// already made. A still-pending one is refreshed in place with the
 	// fresh numbers rather than duplicated.
 	const gameColumn =
-		gameSource === 'imported' ? antiGaffeCandidate.importedGameId : antiGaffeCandidate.reviewedGameId;
+		gameSource === 'imported'
+			? antiGaffeCandidate.importedGameId
+			: antiGaffeCandidate.reviewedGameId;
 
 	const [existing] = await db
 		.select()

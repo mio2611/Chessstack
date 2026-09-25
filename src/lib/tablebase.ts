@@ -177,7 +177,10 @@ export async function evaluateMove(fen: string, uci: string): Promise<MoveEvalua
 	}
 
 	const sound = categoryPreserved(position.category, move.category);
-	const optimal = sound && bestMove !== null && Math.abs(move.dtz ?? Infinity) === Math.abs(bestMove.dtz ?? Infinity);
+	const optimal =
+		sound &&
+		bestMove !== null &&
+		Math.abs(move.dtz ?? Infinity) === Math.abs(bestMove.dtz ?? Infinity);
 
 	return {
 		found: true,

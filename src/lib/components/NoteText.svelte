@@ -21,7 +21,7 @@
 	}
 
 	function bulletIndent(line: string): number {
-		return (line.match(/^\s*/)?.[0].length ?? 0);
+		return line.match(/^\s*/)?.[0].length ?? 0;
 	}
 
 	function bulletText(line: string): string {
