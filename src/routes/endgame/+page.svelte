@@ -85,6 +85,7 @@
 	const DRAW_PLY_THRESHOLD = 30;
 	const THEORY_MAX_RETRIES = 2; // 2 genuine retries, then reveal on the 3rd failure
 
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- not reactive, used only for cleanup
 	const timers = new Set<ReturnType<typeof setTimeout>>();
 	function safeTimeout(fn: () => void, ms: number) {
 		const id = setTimeout(() => {
@@ -152,7 +153,6 @@
 			return; // ChessBoard already validated legality — shouldn't happen
 		}
 		const uci = moveObj.from + moveObj.to + (moveObj.promotion ?? '');
-		const afterFen = chess.fen();
 
 		phase = 'validating';
 
@@ -339,7 +339,8 @@
 			// Unlike puzzles' attempt recording, a failed grade here silently
 			// leaves this card's SR schedule stale — worth saying so, not
 			// staying quiet the way a non-critical failure normally would.
-			feedback = 'The grade could not be saved (network problem). The next exercise is loading anyway.';
+			feedback =
+				'The grade could not be saved (network problem). The next exercise is loading anyway.';
 		}
 
 		safeTimeout(fetchNextCard, 1200);
@@ -405,7 +406,7 @@
 		{:else if phase === 'no-cards'}
 			<div class="empty-state">
 				<h2>Nothing to review right now</h2>
-				<p class="setup-desc">All positions have been seen and none are due today.</p>
+				<p class="setup-desc">No endgame positions are due today.</p>
 			</div>
 		{:else if phase === 'error'}
 			<div class="empty-state">
@@ -478,7 +479,7 @@
 		flex-direction: column;
 		gap: var(--space-4);
 		font-family: var(--font-body);
-		background: var(--color-card);
+		background: var(--color-surface);
 		border: 1px solid var(--color-border);
 		border-radius: var(--radius-lg);
 		padding: var(--space-4);

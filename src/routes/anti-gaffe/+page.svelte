@@ -22,7 +22,7 @@
 	import type { Key } from '@lichess-org/chessground/types';
 	import { onMount } from 'svelte';
 	import { Chess } from 'chess.js';
-	import { initSounds, setSoundEnabled, playMove, playCorrect, playIncorrect } from '$lib/sounds';
+	import { initSounds, setSoundEnabled, playCorrect, playIncorrect } from '$lib/sounds';
 	import { toFullFen } from '$lib/fen';
 	import type { PageData } from './$types';
 
@@ -65,6 +65,7 @@
 			: []
 	);
 
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- not reactive, used only for cleanup
 	const timers = new Set<ReturnType<typeof setTimeout>>();
 	function safeTimeout(fn: () => void, ms: number) {
 		const id = setTimeout(() => {
@@ -112,7 +113,7 @@
 
 	// ── Handling a move ─────────────────────────────────────────────────────
 
-	function handleMove(from: string, to: string, san: string, _newFen: string): void {
+	function handleMove(from: string, to: string, san: string): void {
 		if (phase !== 'playing' || !card) return;
 
 		const chess = new Chess(currentFen);
@@ -161,7 +162,8 @@
 		} catch {
 			// Unlike a failed move, a failed grade here silently leaves this
 			// card's SR schedule stale — worth saying so, not staying quiet.
-			feedback = 'The grade could not be saved (network problem). The next exercise is loading anyway.';
+			feedback =
+				'The grade could not be saved (network problem). The next exercise is loading anyway.';
 		}
 		grading = false;
 		await fetchNextCard();
@@ -242,7 +244,7 @@
 		{:else if phase === 'no-cards'}
 			<div class="empty-state">
 				<h2>Nothing to review right now</h2>
-				<p class="setup-desc">All blunder positions have been seen and none are due today.</p>
+				<p class="setup-desc">No blunder positions are due today.</p>
 			</div>
 		{:else if phase === 'error'}
 			<div class="empty-state">
@@ -268,15 +270,27 @@
 				<div class="section">
 					<div class="section-label">HOW CONFIDENT WAS YOUR RESPONSE?</div>
 					<div class="grade-buttons">
-						<button class="grade-btn grade-btn--forgot" onclick={() => submitGrade(1)} disabled={grading}>
+						<button
+							class="grade-btn grade-btn--forgot"
+							onclick={() => submitGrade(1)}
+							disabled={grading}
+						>
 							<span class="grade-label">Forgot</span>
 							<span class="grade-interval">{card.intervalLabels.forgot}</span>
 						</button>
-						<button class="grade-btn grade-btn--unsure" onclick={() => submitGrade(3)} disabled={grading}>
+						<button
+							class="grade-btn grade-btn--unsure"
+							onclick={() => submitGrade(3)}
+							disabled={grading}
+						>
 							<span class="grade-label">Unsure</span>
 							<span class="grade-interval">{card.intervalLabels.unsure}</span>
 						</button>
-						<button class="grade-btn grade-btn--easy" onclick={() => submitGrade(4)} disabled={grading}>
+						<button
+							class="grade-btn grade-btn--easy"
+							onclick={() => submitGrade(4)}
+							disabled={grading}
+						>
 							<span class="grade-label">Easy</span>
 							<span class="grade-interval">{card.intervalLabels.easy}</span>
 						</button>
@@ -348,7 +362,7 @@
 		flex-direction: column;
 		gap: var(--space-4);
 		font-family: var(--font-body);
-		background: var(--color-card);
+		background: var(--color-surface);
 		border: 1px solid var(--color-border);
 		border-radius: var(--radius-lg);
 		padding: var(--space-4);

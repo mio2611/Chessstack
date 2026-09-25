@@ -184,13 +184,16 @@ export const load: PageServerLoad = async ({ parent, locals }) => {
 		.from(reviewLog)
 		.where(and(eq(reviewLog.userId, userId), inArray(reviewLog.cardId, cardIds)));
 
-	const youngLearning: RetentionBucket = { totalReviews: 0, successCount: 0, observedRetention: null };
+	const youngLearning: RetentionBucket = {
+		totalReviews: 0,
+		successCount: 0,
+		observedRetention: null
+	};
 	const mature: RetentionBucket = { totalReviews: 0, successCount: 0, observedRetention: null };
 	let earliestReview: Date | null = null;
 	for (const row of logRows) {
 		const wasMature =
-			row.stateBefore === State.Review &&
-			(row.scheduledDaysBefore ?? 0) > MATURE_THRESHOLD_DAYS;
+			row.stateBefore === State.Review && (row.scheduledDaysBefore ?? 0) > MATURE_THRESHOLD_DAYS;
 		const bucket = wasMature ? mature : youngLearning;
 		bucket.totalReviews++;
 		if (row.rating !== Rating.Again) bucket.successCount++;
@@ -223,7 +226,13 @@ export const load: PageServerLoad = async ({ parent, locals }) => {
 		const key = match ? `${match.code} ${match.name}` : 'unclassified';
 		let entry = byOpening.get(key);
 		if (!entry) {
-			entry = { name: match?.name ?? null, code: match?.code ?? null, cards: 0, lapses: 0, reviews: 0 };
+			entry = {
+				name: match?.name ?? null,
+				code: match?.code ?? null,
+				cards: 0,
+				lapses: 0,
+				reviews: 0
+			};
 			byOpening.set(key, entry);
 		}
 		entry.cards++;

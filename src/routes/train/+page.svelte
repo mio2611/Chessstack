@@ -1019,7 +1019,7 @@
 		display: flex;
 		flex-direction: column;
 		gap: var(--space-4);
-		background: var(--color-card);
+		background: var(--color-surface);
 		border: 1px solid var(--color-border);
 		border-radius: var(--radius-lg);
 		padding: var(--space-4);

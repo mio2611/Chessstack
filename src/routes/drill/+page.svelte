@@ -220,7 +220,9 @@
 	// Restored from ?type=line so the "Drill all lines" link (which does a full
 	// page navigation to apply ?mode=all) lands back on the same tab instead
 	// of silently reverting to card mode.
-	let drillType = $state<'card' | 'line'>(page.url.searchParams.get('type') === 'line' ? 'line' : 'card');
+	let drillType = $state<'card' | 'line'>(
+		page.url.searchParams.get('type') === 'line' ? 'line' : 'card'
+	);
 
 	// All enumerated root-to-leaf lines, sorted weakest-first.
 	let allLines = $state<LineStep[][]>([]);
@@ -1637,7 +1639,11 @@
 		{#if pendingLineNoteStep}
 			<div class="note-box line-note-pause">
 				<div class="note-label">NOTE — {pendingLineNoteStep.san}</div>
-				<NoteText text={noteByMove.get(fenKey(pendingLineNoteStep.fromFen) + ':' + pendingLineNoteStep.san) ?? ''} />
+				<NoteText
+					text={noteByMove.get(
+						fenKey(pendingLineNoteStep.fromFen) + ':' + pendingLineNoteStep.san
+					) ?? ''}
+				/>
 				<div class="line-note-actions">
 					<a
 						href={editNoteHref(currentLine.slice(0, lineStepIdx).map((s) => s.san))}
@@ -1662,8 +1668,9 @@
 						No cards due right now. Come back later or build more repertoire.
 					</p>
 					<a href="/build" class="btn btn--primary">Build Mode</a>
-					<a href="/drill?mode=all{drillType === 'line' ? '&type=line' : ''}" class="btn btn--secondary"
-						>Drill all {drillType === 'line' ? 'lines' : 'cards'}</a
+					<a
+						href="/drill?mode=all{drillType === 'line' ? '&type=line' : ''}"
+						class="btn btn--secondary">Drill all {drillType === 'line' ? 'lines' : 'cards'}</a
 					>
 				</div>
 			{:else}

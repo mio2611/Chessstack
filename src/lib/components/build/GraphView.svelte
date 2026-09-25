@@ -209,7 +209,7 @@
 		const nodeList = layout.nodes;
 		const node = nodeList.find((n) => n.fenKey === key);
 		if (!node) return;
-    
+
 		untrack(() => {
 			if (!viewport) return;
 			const rect = viewport.getBoundingClientRect();
@@ -293,7 +293,9 @@
 		<button class="graph-btn" onclick={resetView} title="Réinitialiser la vue">⟲</button>
 	</div>
 	{#if layout.nodes.length === 0}
-		<div class="graph-empty">Aucun coup pour l'instant. Jouez un coup sur l'échiquier pour commencer.</div>
+		<div class="graph-empty">
+			Aucun coup pour l'instant. Jouez un coup sur l'échiquier pour commencer.
+		</div>
 	{:else}
 		<div
 			class="graph-viewport"
@@ -325,7 +327,8 @@
 						class:is-opponent={node.pathSans.length > 0 && !isOwnMove(node)}
 						class:is-mature={isMature(node)}
 						class:is-struggling={isStruggling(node)}
-						style="left: {node.x - NODE_WIDTH / 2}px; top: {node.y - NODE_HEIGHT / 2}px; width: {NODE_WIDTH}px; height: {NODE_HEIGHT}px;"
+						style="left: {node.x - NODE_WIDTH / 2}px; top: {node.y -
+							NODE_HEIGHT / 2}px; width: {NODE_WIDTH}px; height: {NODE_HEIGHT}px;"
 						onclick={() => handleNodeClickGuarded(node)}
 						onmouseenter={() => {
 							if (!isDragging) onPreviewFen(node.fen);

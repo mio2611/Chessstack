@@ -483,7 +483,9 @@
 							<option value={1}>1%+ popularity</option>
 						</select>
 					</div>
-					<p class="gap-rating-note">Popularity based on Lichess games in the {data.gapRatingLabel} range.</p>
+					<p class="gap-rating-note">
+						Popularity based on Lichess games in the {data.gapRatingLabel} range.
+					</p>
 					<div class="gap-section-tabs">
 						<button
 							class="gap-section-tab"
@@ -568,7 +570,9 @@
 							<option value={1}>1%+ popularity</option>
 						</select>
 					</div>
-					<p class="gap-rating-note">Popularity based on Lichess games in the {data.gapRatingLabel} range.</p>
+					<p class="gap-rating-note">
+						Popularity based on Lichess games in the {data.gapRatingLabel} range.
+					</p>
 					<p>No gaps — repertoire fully covered</p>
 				</div>
 			{/if}
