@@ -47,7 +47,14 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 
 	const now = new Date();
 	const updated = gradeCard(card, rating as Rating, now, fsrsConfig);
-	const logEntry = buildReviewLogEntry(card, rating as Rating, updated, now, 'ANTI_GAFFE', fsrsConfig);
+	const logEntry = buildReviewLogEntry(
+		card,
+		rating as Rating,
+		updated,
+		now,
+		'ANTI_GAFFE',
+		fsrsConfig
+	);
 
 	await db.transaction(async (tx) => {
 		await tx.update(antiGaffeCard).set(updated).where(eq(antiGaffeCard.id, cardId));

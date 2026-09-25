@@ -88,7 +88,10 @@
 				<div class="widget-label">Workload — Next 14 Days</div>
 				<div class="forecast-row">
 					{#each forecast as day (day.dayOffset)}
-						<div class="forecast-col" title="{dayLabel(day.dayOffset)}: {day.mature + day.youngLearning} due">
+						<div
+							class="forecast-col"
+							title="{dayLabel(day.dayOffset)}: {day.mature + day.youngLearning} due"
+						>
 							<div class="forecast-bar">
 								<div
 									class="forecast-segment forecast-mature"
@@ -112,8 +115,8 @@
 					>
 				</div>
 				<p class="widget-note">
-					Based on each card's currently scheduled due date — not a simulation of how you'll
-					grade it when it comes up.
+					Based on each card's currently scheduled due date — not a simulation of how you'll grade
+					it when it comes up.
 				</p>
 			</div>
 
