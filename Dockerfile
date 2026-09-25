@@ -51,7 +51,7 @@ COPY package.json package-lock.json ./
 
 # npm ci = clean install from the exact versions in package-lock.json.
 # Preferred over `npm install` in CI/CD and Docker builds for reproducibility.
-RUN npm ci
+RUN npm ci --loglevel verbose
 
 # Copy the rest of the source. This happens after npm ci so that changing a
 # source file does not invalidate the node_modules cache layer.
