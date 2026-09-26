@@ -28,6 +28,16 @@
 
 <script lang="ts">
 	import { RATING_BRACKETS, DEFAULT_BRACKET_ID } from '$lib/ratings';
+	import { Chess } from 'chess.js';
+	import { evaluatePositionMultiPv, TARGET_DEPTH as ENGINE_TARGET_DEPTH } from '$lib/client/stockfish';
+
+	// How long to wait after the position stops changing before starting a
+	// depth-20 search. Without this, clicking through several positions in
+	// quick succession (Build mode) would fire a search per click — each one
+	// superseding the last (see evaluatePositionMultiPv's `interactive`
+	// flag) but still costing a wasted ucinewgame/isready round-trip and a
+	// moment of burned CPU before being cancelled.
+	const ENGINE_DEBOUNCE_MS = 350;
 
 	interface Candidate {
 		san: string;
@@ -112,6 +122,11 @@
 	let engineAvailable = $state(true);
 	let engineDepth = $state(0);
 	let engineMaxDepth = $state(0);
+	// True once a search has finished, if it actually reached
+	// ENGINE_TARGET_DEPTH (as opposed to being cut off by the 3-minute
+	// engine watchdog — see stockfish.ts). Only meaningful once
+	// engineLoading is false; ignored while a search is still running.
+	let engineCompleted = $state(true);
 
 	// ── Masters state ─────────────────────────────────────────────────────────
 	let mastersMoves = $state<MastersMove[]>([]);
@@ -262,7 +277,7 @@
 		fetch('/api/stockfish', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ fen, mode: 'book' }),
+			body: JSON.stringify({ fen }),
 			signal: controller.signal
 		})
 			.then((res) => {
@@ -289,63 +304,80 @@
 		};
 	});
 
-	// ── Engine stream — progressive Stockfish analysis via SSE ────────────────
-	// Opens a Server-Sent Events connection that yields eval updates at each
-	// search depth. The eval bar and candidate list update live as the engine
-	// searches deeper — no more waiting for the full analysis to finish.
+	// ── Engine — client-side Stockfish (WASM, depth-20 fixed, no server round-trip) ──
+	// Runs entirely in the browser via $lib/client/stockfish — see that
+	// module for the depth/watchdog/perspective rationale. `interactive:
+	// true` lets a newer call (moving to another position) cancel an
+	// older, still-running one instead of queueing behind it; a debounce
+	// avoids firing a search for every position briefly passed through
+	// while clicking through the tree.
 	$effect(() => {
 		const fen = currentFen;
-		const params = new URLSearchParams({ fen });
-		const es = new EventSource(`/api/stockfish/stream?${params}`);
+		let cancelled = false;
 
 		engineLoading = true;
 		engineError = false;
 		engineCandidates = [];
 		engineDepth = 0;
-		engineMaxDepth = 0;
+		engineMaxDepth = ENGINE_TARGET_DEPTH;
+		engineCompleted = true;
 
-		es.onmessage = (event) => {
+		const debounceTimer = setTimeout(() => {
+			let whiteMultiplier: 1 | -1;
 			try {
-				const data = JSON.parse(event.data) as {
-					depth: number;
-					maxDepth: number;
-					candidates: Array<{
-						san: string;
-						uci: string;
-						evalCp: number | null;
-						evalMate: number | null;
-					}>;
-					done: boolean;
-				};
-
-				// Map streaming candidates to the full Candidate shape used by the UI.
-				engineCandidates = data.candidates.map((c) => ({
-					...c,
-					isBook: false,
-					annotation: null,
-					openingName: null
-				}));
-				engineDepth = data.depth;
-				engineMaxDepth = data.maxDepth;
-				engineAvailable = data.candidates.length > 0;
-
-				if (data.done) {
-					engineLoading = false;
-					es.close();
-				}
+				whiteMultiplier = new Chess(fen).turn() === 'w' ? 1 : -1;
 			} catch {
-				// Malformed event — ignore and wait for the next one.
+				engineError = true;
+				engineLoading = false;
+				return;
 			}
-		};
 
-		es.onerror = () => {
-			engineError = true;
-			engineLoading = false;
-			es.close();
-		};
+			evaluatePositionMultiPv(
+				fen,
+				3,
+				({ depth }) => {
+					if (cancelled) return;
+					engineDepth = depth;
+				},
+				true
+			)
+				.then((lines) => {
+					if (cancelled) return;
+
+					// Empty on checkmate/stalemate. (A call superseded before
+					// ever reaching the engine also resolves empty, but by
+					// then `cancelled` is already true for this closure — see
+					// nextInteractiveRequestId in stockfish.ts — so that case
+					// never reaches here.)
+					if (lines.length === 0) {
+						engineAvailable = false;
+						engineLoading = false;
+						return;
+					}
+
+					engineCandidates = lines.map((l) => ({
+						san: l.moveSan ?? l.moveUci,
+						uci: l.moveUci,
+						evalCp: l.evalCp != null ? l.evalCp * whiteMultiplier : null,
+						evalMate: l.evalMate != null ? l.evalMate * whiteMultiplier : null,
+						isBook: false,
+						annotation: null,
+						openingName: null
+					}));
+					engineAvailable = true;
+					engineCompleted = engineDepth >= ENGINE_TARGET_DEPTH;
+					engineLoading = false;
+				})
+				.catch(() => {
+					if (cancelled) return;
+					engineError = true;
+					engineLoading = false;
+				});
+		}, ENGINE_DEBOUNCE_MS);
 
 		return () => {
-			es.close();
+			cancelled = true;
+			clearTimeout(debounceTimer);
 		};
 	});
 
@@ -821,8 +853,11 @@
 				</button>
 			{/each}
 		</div>
-		{#if engineLoading && engineDepth > 0}
-			<div class="depth-indicator">depth {engineDepth} / {engineMaxDepth}</div>
+		{#if engineDepth > 0}
+			<div class="depth-indicator" class:depth-indicator-truncated={!engineLoading && !engineCompleted}>
+				depth {engineDepth} / {engineMaxDepth}{#if !engineLoading && !engineCompleted}
+					{' '}(cut short){/if}
+			</div>
 		{/if}
 	{/if}
 </div>
@@ -1079,6 +1114,12 @@
 		text-align: right;
 		font-variant-numeric: tabular-nums;
 		padding-right: var(--space-2);
+	}
+
+	/* Search ended before reaching depth 20 (3-minute engine watchdog) —
+	   make that visible instead of silently showing a partial result. */
+	.depth-indicator-truncated {
+		color: var(--color-danger);
 	}
 
 	/* ── Mobile compact mode ── --bp-md */
