@@ -29,7 +29,10 @@
 <script lang="ts">
 	import { RATING_BRACKETS, DEFAULT_BRACKET_ID } from '$lib/ratings';
 	import { Chess } from 'chess.js';
-	import { evaluatePositionMultiPv, TARGET_DEPTH as ENGINE_TARGET_DEPTH } from '$lib/client/stockfish';
+	import {
+		evaluatePositionMultiPv,
+		TARGET_DEPTH as ENGINE_TARGET_DEPTH
+	} from '$lib/client/stockfish';
 
 	// How long to wait after the position stops changing before starting a
 	// depth-20 search. Without this, clicking through several positions in
@@ -854,9 +857,12 @@
 			{/each}
 		</div>
 		{#if engineDepth > 0}
-			<div class="depth-indicator" class:depth-indicator-truncated={!engineLoading && !engineCompleted}>
-				depth {engineDepth} / {engineMaxDepth}{#if !engineLoading && !engineCompleted}
-					{' '}(cut short){/if}
+			<div
+				class="depth-indicator"
+				class:depth-indicator-truncated={!engineLoading && !engineCompleted}
+			>
+				depth {engineDepth} / {engineMaxDepth}
+				{#if !engineLoading && !engineCompleted}(cut short){/if}
 			</div>
 		{/if}
 	{/if}
