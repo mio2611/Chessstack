@@ -65,6 +65,38 @@ let readyPromise: Promise<void> | null = null;
 // starting its own search.
 let queue: Promise<unknown> = Promise.resolve();
 
+// Opt-in cancellation for interactive callers only (the Build/Review
+// engine tab, via evaluatePositionMultiPv's `interactive` flag) that may
+// issue a new request before the previous one has resolved — one person
+// clicking through several positions in the tree faster than a depth-20
+// search completes.
+//
+// Deliberately entirely separate from — and invisible to — non-interactive
+// calls (the anti-gaffe scan, CPL review, evaluatePosition): those never
+// call nextInteractiveRequestId, so they are never superseded and never
+// send 'stop' to interrupt anyone else's search. An interactive call only
+// ever cancels another *interactive* call, never a batch one — if an
+// interactive request happens to be queued behind an active batch search,
+// it simply waits its turn like before, it does not cut the batch search
+// short. That keeps a cancelled interactive search from ever being the
+// thing a batch caller (e.g. review's anti-gaffe MultiPV cache) persists
+// as if it were a complete depth-20 result.
+let latestInteractiveRequestId = 0;
+let activeInteractiveRequestId: number | null = null;
+
+function nextInteractiveRequestId(): number {
+	const id = ++latestInteractiveRequestId;
+	if (activeInteractiveRequestId !== null && activeInteractiveRequestId !== id) {
+		getWorker().postMessage('stop');
+	}
+	return id;
+}
+
+/** True if a newer interactive call has been made since this one started waiting in the queue — this call's result is stale and should not touch the engine. */
+function isInteractiveSuperseded(requestId: number): boolean {
+	return requestId !== latestInteractiveRequestId;
+}
+
 function getWorker(): Worker {
 	if (!worker) {
 		worker = new Worker(ENGINE_URL);
@@ -268,13 +300,28 @@ const PV_MOVE_RE = /\bpv (\S+)/;
  * Same depth/watchdog/queue behaviour as evaluatePosition — see its own
  * comments. Returns fewer than `lines` entries if the position has fewer
  * legal moves than requested, or none at all on checkmate/stalemate.
+ *
+ * Pass `interactive: true` for callers where a newer call can supersede an
+ * older, still-running one — e.g. the Build/Review engine tab, where the
+ * user may move to a new position before the previous depth-20 search
+ * finishes. See nextInteractiveRequestId's comment for the exact
+ * semantics. Leave it false (the default) for sequential/batch callers
+ * such as review's anti-gaffe MultiPV lookup, which always awaits one call
+ * before issuing the next and must never have its search cut short by an
+ * unrelated interactive caller — this flag is what keeps the two fully
+ * decoupled.
  */
 export function evaluatePositionMultiPv(
 	fen: string,
 	lines: number,
-	onProgress?: (p: EvalProgress) => void
+	onProgress?: (p: EvalProgress) => void,
+	interactive = false
 ): Promise<MultiPvLine[]> {
+	const requestId = interactive ? nextInteractiveRequestId() : null;
+
 	const run = async (): Promise<MultiPvLine[]> => {
+		if (requestId !== null && isInteractiveSuperseded(requestId)) return [];
+
 		const w = getWorker();
 		if (!readyPromise) readyPromise = ensureReady(w);
 		await readyPromise;
@@ -286,6 +333,7 @@ export function evaluatePositionMultiPv(
 		await resetForNewSearch(w, lines);
 		w.postMessage(`position fen ${fen}`);
 		w.postMessage(`go depth ${TARGET_DEPTH}`);
+		if (requestId !== null) activeInteractiveRequestId = requestId;
 
 		try {
 			await waitFor(
@@ -325,6 +373,10 @@ export function evaluatePositionMultiPv(
 					.map((slot) => slots.get(slot)!);
 			}
 			throw err;
+		} finally {
+			if (requestId !== null && activeInteractiveRequestId === requestId) {
+				activeInteractiveRequestId = null;
+			}
 		}
 	};
 
