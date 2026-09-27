@@ -1,0 +1,29 @@
+diff --git a/src/lib/components/build/GraphView.svelte b/src/lib/components/build/GraphView.svelte
+index b563e51..deb8271 100644
+--- a/src/lib/components/build/GraphView.svelte
++++ b/src/lib/components/build/GraphView.svelte
+@@ -21,7 +21,7 @@
+ 	import { buildMoveGraph, type GraphNode, type GraphEdge } from './moveGraphBuilder';
+ 	import { untrack } from 'svelte';
+ 	import type { RepertoireMove } from './buildState.svelte';
+-	import { SvelteMap } from 'svelte/reactivity';
++	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
+ 
+ 	// Inlined locally under a distinct name rather than imported from
+ 	// $lib/fen: importing the shared fenKey here (or even a locally-defined
+@@ -209,13 +209,13 @@
+ 
+ 	function computeMasteryZones(nodes: LaidOutNode[], edges: LaidOutEdge[]): MasteryZone[] {
+ 		const byKey = new Map(nodes.map((n) => [n.fenKey, n]));
+-		const adjacency = new Map<string, string[]>();
++		const adjacency = new SvelteMap<string, string[]>();
+ 		for (const e of edges) {
+ 			(adjacency.get(e.fromKey) ?? adjacency.set(e.fromKey, []).get(e.fromKey)!).push(e.toKey);
+ 			(adjacency.get(e.toKey) ?? adjacency.set(e.toKey, []).get(e.toKey)!).push(e.fromKey);
+ 		}
+ 
+-		const visited = new Set<string>();
++		const visited = new SvelteSet<string>();
+ 		const zones: MasteryZone[] = [];
+ 
+ 		for (const startNode of nodes) {
