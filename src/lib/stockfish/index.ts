@@ -54,10 +54,19 @@ export interface TopMovesResult {
 
 // Asks Stockfish to analyse a position and return its top candidate moves.
 //
-// fen       — position to analyse, in FEN notation
-// depth     — search depth in half-moves (higher = stronger but slower)
-// numMoves  — how many candidates to return (controls the MultiPV setting)
-// timeoutMs — how long to wait before returning partial results (user-configurable)
+// fen        — position to analyse, in FEN notation
+// depth      — search depth in half-moves (higher = stronger but slower)
+// numMoves   — how many candidates to return (controls the MultiPV setting)
+// timeoutMs  — fixed hard cap before returning partial results. Ignored when
+//              watchdogMs is provided (see below).
+// watchdogMs — when set, replaces the fixed timeoutMs cap with a resettable
+//              timer: it is rearmed every time Stockfish reports a new,
+//              higher search depth, and only fires if no depth progress
+//              arrives for watchdogMs. Use this for one-shot background
+//              evaluations that must reach a target depth reliably rather
+//              than complete within a fixed wall-clock budget (e.g. a
+//              single post-game evaluation). Leave unset for interactive
+//              callers that need a bounded response time (e.g. evalCache).
 //
 // Returns { moves: [], completed: false } without throwing if the engine is
 // unavailable.
@@ -65,7 +74,8 @@ export async function getTopMoves(
 	fen: string,
 	depth: number,
 	numMoves: number,
-	timeoutMs: number = DEFAULT_TIMEOUT_MS
+	timeoutMs: number = DEFAULT_TIMEOUT_MS,
+	watchdogMs?: number
 ): Promise<TopMovesResult> {
 	return new Promise((resolve) => {
 		// bestResults maps MultiPV index (1-based) → latest result for that PV.
@@ -73,6 +83,8 @@ export async function getTopMoves(
 		const bestResults = new Map<number, StockfishMove>();
 		let buffer = '';
 		let resolved = false;
+		// Only tracked/used when watchdogMs is set — see rearmWatchdog below.
+		let lastDepthSeen = 0;
 
 		// Guard: ensure we only resolve once (timeout, bestmove, or process exit
 		// can all race to resolve).
@@ -112,7 +124,19 @@ export async function getTopMoves(
 
 		// Safety net: if analysis takes too long, return partial results rather
 		// than hanging the request indefinitely. Not a real completion.
-		const timer = setTimeout(() => finish(false), timeoutMs);
+		//
+		// Without watchdogMs, this is a plain one-shot timer (existing behaviour,
+		// e.g. evalCache): it fires once, at timeoutMs, regardless of progress.
+		//
+		// With watchdogMs, rearmWatchdog() below resets it on every depth
+		// increase, so it only fires after watchdogMs of no progress at all.
+		let timer = setTimeout(() => finish(false), watchdogMs ?? timeoutMs);
+
+		const rearmWatchdog = () => {
+			if (watchdogMs == null) return;
+			clearTimeout(timer);
+			timer = setTimeout(() => finish(false), watchdogMs);
+		};
 
 		// UCI handshake. stdin is available immediately after spawn — no "connect"
 		// event needed. We set MultiPV before "isready" so the option is in place
@@ -143,6 +167,19 @@ export async function getTopMoves(
 					const multipvMatch = line.match(/multipv (\d+)/);
 					const pvMatch = line.match(/ pv ([a-h][1-8][a-h][1-8][qrbn]?)/);
 					if (!multipvMatch || !pvMatch) continue;
+
+					// Progress signal for the watchdog: only a strictly higher depth
+					// than previously seen counts as progress, matching the client-side
+					// anti-gaffe watchdog's definition (depth change, not just engine
+					// activity).
+					const depthMatch = line.match(/^info depth (\d+)/);
+					if (depthMatch) {
+						const currentDepth = parseInt(depthMatch[1], 10);
+						if (currentDepth > lastDepthSeen) {
+							lastDepthSeen = currentDepth;
+							rearmWatchdog();
+						}
+					}
 
 					const pvIdx = parseInt(multipvMatch[1], 10);
 					const uci = pvMatch[1];
