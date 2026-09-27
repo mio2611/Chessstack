@@ -12,6 +12,19 @@ import { getTopMoves } from '$lib/stockfish';
 import { evalToScore, computeRatingChange, bracketMidpoint } from '$lib/trainer';
 import type { TrainerEvalResult } from '$lib/trainer';
 
+// Fixed target depth for the post-game evaluation. Not user-configurable:
+// this endpoint is the only caller of getTopMoves that needs it, and unlike
+// review/anti-gaffe there is no per-move volume to justify moving it
+// client-side (one call per game). A single fixed value keeps the trainer
+// rating computation a trusted server-side source of truth.
+const TRAIN_EVAL_DEPTH = 20;
+
+// Watchdog grace period: no fixed wall-clock cap, since this call is a
+// one-shot background evaluation, not an interactive request blocking a
+// click. Fires only if depth 20 makes no progress for this long, same
+// threshold as the anti-gaffe scan's client-side watchdog.
+const TRAIN_EVAL_WATCHDOG_MS = 3 * 60 * 1000;
+
 export const POST: RequestHandler = async ({ request, locals }) => {
 	if (!locals.user) throw error(401, 'Not authenticated');
 
@@ -58,22 +71,24 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const userId = locals.user.id;
 	const isRated = rated === true;
 
-	// Load user's Stockfish settings and current trainer rating
+	// Load current trainer rating
 	const [settings] = await db
 		.select({
-			stockfishDepth: userSettings.stockfishDepth,
-			stockfishTimeout: userSettings.stockfishTimeout,
 			trainerRating: userSettings.trainerRating
 		})
 		.from(userSettings)
 		.where(eq(userSettings.userId, userId));
 
-	const depth = settings?.stockfishDepth ?? 15;
-	const timeoutSec = settings?.stockfishTimeout ?? 10;
 	const currentRating = settings?.trainerRating ?? 1200;
 
 	// Run Stockfish evaluation (only need 1 PV for the eval score)
-	const { moves: engineResults, completed } = await getTopMoves(fen, depth, 1, timeoutSec * 1000);
+	const { moves: engineResults, completed } = await getTopMoves(
+		fen,
+		TRAIN_EVAL_DEPTH,
+		1,
+		undefined,
+		TRAIN_EVAL_WATCHDOG_MS
+	);
 
 	const result: TrainerEvalResult = {
 		evalCp: null,
