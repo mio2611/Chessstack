@@ -20,8 +20,6 @@
 	}
 
 	onDestroy(() => {
-		clearTimeout(depthTimeout);
-		clearTimeout(timeoutDebounce);
 		clearTimeout(tempoDebounce);
 		clearTimeout(playbackDebounce);
 		clearTimeout(retentionDebounce);
@@ -116,75 +114,6 @@
 		} catch {
 			// Revert on failure
 			soundEnabled = !soundEnabled;
-		}
-	}
-
-	// ── Stockfish Depth ─────────────────────────────────────────────────────
-	// eslint-disable-next-line svelte/prefer-writable-derived
-	let stockfishDepth = $state(15);
-	let depthStatus = $state('');
-	let depthTimeout: ReturnType<typeof setTimeout> | undefined;
-
-	$effect(() => {
-		stockfishDepth = data.settings?.stockfishDepth ?? 15;
-	});
-
-	function handleDepthChange(e: Event) {
-		const value = parseInt((e.target as HTMLInputElement).value);
-		stockfishDepth = value;
-		// Debounce: save after the user stops dragging
-		clearTimeout(depthTimeout);
-		depthTimeout = setTimeout(() => saveDepth(value), 400);
-	}
-
-	async function saveDepth(value: number) {
-		depthStatus = '';
-		try {
-			const res = await fetch('/api/settings', {
-				method: 'PATCH',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ stockfishDepth: value })
-			});
-			if (!res.ok) throw new Error('Failed to save');
-			await invalidateAll();
-			depthStatus = 'Saved';
-			safeTimeout(() => (depthStatus = ''), 2000);
-		} catch {
-			depthStatus = 'Error saving';
-		}
-	}
-
-	// ── Stockfish Timeout ───────────────────────────────────────────────────
-	// eslint-disable-next-line svelte/prefer-writable-derived
-	let stockfishTimeout = $state(10);
-	let timeoutStatus = $state('');
-	let timeoutDebounce: ReturnType<typeof setTimeout> | undefined;
-
-	$effect(() => {
-		stockfishTimeout = data.settings?.stockfishTimeout ?? 10;
-	});
-
-	function handleTimeoutChange(e: Event) {
-		const value = parseInt((e.target as HTMLInputElement).value);
-		stockfishTimeout = value;
-		clearTimeout(timeoutDebounce);
-		timeoutDebounce = setTimeout(() => saveTimeout(value), 400);
-	}
-
-	async function saveTimeout(value: number) {
-		timeoutStatus = '';
-		try {
-			const res = await fetch('/api/settings', {
-				method: 'PATCH',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ stockfishTimeout: value })
-			});
-			if (!res.ok) throw new Error('Failed to save');
-			await invalidateAll();
-			timeoutStatus = 'Saved';
-			safeTimeout(() => (timeoutStatus = ''), 2000);
-		} catch {
-			timeoutStatus = 'Error saving';
 		}
 	}
 
@@ -609,59 +538,6 @@
 				<button class="toggle-btn" class:active={soundEnabled} onclick={toggleSound}>
 					{soundEnabled ? 'On' : 'Off'}
 				</button>
-			</div>
-		</section>
-
-		<!-- ── Analysis ────────────────────────────────────────────────────── -->
-		<section class="settings-section">
-			<h2>Analysis</h2>
-
-			<div class="setting-row">
-				<label class="setting-label" for="depth-slider">
-					Stockfish Depth: <strong>{stockfishDepth}</strong>
-				</label>
-				<div class="slider-wrap">
-					<span class="slider-label">15</span>
-					<input
-						id="depth-slider"
-						type="range"
-						min="15"
-						max="30"
-						step="1"
-						value={stockfishDepth}
-						oninput={handleDepthChange}
-					/>
-					<span class="slider-label">30</span>
-				</div>
-				<p class="setting-hint">Higher = stronger analysis but slower. 20 is a good default.</p>
-				{#if depthStatus}
-					<span class="status-msg">{depthStatus}</span>
-				{/if}
-			</div>
-
-			<div class="setting-row">
-				<label class="setting-label" for="timeout-slider">
-					Analysis Timeout: <strong>{stockfishTimeout}s</strong>
-				</label>
-				<div class="slider-wrap">
-					<span class="slider-label">3s</span>
-					<input
-						id="timeout-slider"
-						type="range"
-						min="3"
-						max="30"
-						step="1"
-						value={stockfishTimeout}
-						oninput={handleTimeoutChange}
-					/>
-					<span class="slider-label">30s</span>
-				</div>
-				<p class="setting-hint">
-					Max time to wait for engine results. Increase for deeper analysis at higher depths.
-				</p>
-				{#if timeoutStatus}
-					<span class="status-msg">{timeoutStatus}</span>
-				{/if}
 			</div>
 		</section>
 
