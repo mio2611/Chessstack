@@ -178,6 +178,78 @@
 		return (cs.lapses ?? 0) >= STRUGGLE_LAPSE_THRESHOLD && !isMature(node);
 	}
 
+	// ── Mastery zones ───────────────────────────────────────────────────────
+	// A translucent "gooey" background blob behind each maximal run of mature
+	// own-moves, so mastered lines read as continuous shapes at any zoom level
+	// instead of relying on the is-mature border, which shrinks below one
+	// screen pixel once the canvas is zoomed out (border width scales with
+	// the canvas transform; a filled area degrades far more gracefully).
+	//
+	// Own-move nodes never sit directly next to each other in the graph — an
+	// opponent reply always sits between two of your own moves — so grouping
+	// by direct mature-to-mature adjacency would only ever find isolated
+	// single-node "zones". Opponent nodes are therefore tunnelled through
+	// (treated as always passable) while walking the graph, so a fully
+	// mastered line forms one connected zone from its first mature move to
+	// its last, with the opponent replies in between included as zone
+	// members purely so the blob covers the ribbon continuously — they carry
+	// no maturity state of their own. The root node never joins a zone.
+	const MASTERY_ZONE_RADIUS = 46; // px, in unscaled canvas coordinates
+	const MASTERY_ZONE_BLUR = 9; // stdDeviation for the goo filter
+
+	interface MasteryZone {
+		id: string;
+		nodes: LaidOutNode[];
+	}
+
+	function isZonePassable(node: LaidOutNode): boolean {
+		if (node.pathSans.length === 0) return false; // root joins no zone
+		return isOwnMove(node) ? isMature(node) : true; // opponent replies tunnel through
+	}
+
+	function computeMasteryZones(nodes: LaidOutNode[], edges: LaidOutEdge[]): MasteryZone[] {
+		const byKey = new Map(nodes.map((n) => [n.fenKey, n]));
+		const adjacency = new Map<string, string[]>();
+		for (const e of edges) {
+			(adjacency.get(e.fromKey) ?? adjacency.set(e.fromKey, []).get(e.fromKey)!).push(e.toKey);
+			(adjacency.get(e.toKey) ?? adjacency.set(e.toKey, []).get(e.toKey)!).push(e.fromKey);
+		}
+
+		const visited = new Set<string>();
+		const zones: MasteryZone[] = [];
+
+		for (const startNode of nodes) {
+			if (!isOwnMove(startNode) || !isMature(startNode) || visited.has(startNode.fenKey)) {
+				continue;
+			}
+
+			const zoneNodes: LaidOutNode[] = [];
+			const queue = [startNode.fenKey];
+			visited.add(startNode.fenKey);
+
+			while (queue.length > 0) {
+				const key = queue.shift()!;
+				const current = byKey.get(key);
+				if (!current) continue;
+				zoneNodes.push(current);
+
+				for (const neighborKey of adjacency.get(key) ?? []) {
+					if (visited.has(neighborKey)) continue;
+					const neighbor = byKey.get(neighborKey);
+					if (!neighbor || !isZonePassable(neighbor)) continue;
+					visited.add(neighborKey);
+					queue.push(neighborKey);
+				}
+			}
+
+			zones.push({ id: startNode.fenKey, nodes: zoneNodes });
+		}
+
+		return zones;
+	}
+
+	const masteryZones = $derived.by(() => computeMasteryZones(layout.nodes, layout.edges));
+
 	function handleNodeClick(node: LaidOutNode) {
 		onPreviewFen(null);
 		onNavigateToLine(node.pathSans);
@@ -313,6 +385,25 @@
 				class="graph-canvas"
 				style="transform: translate({panX}px, {panY}px) scale({scale}); width: {layout.width}px; height: {layout.height}px;"
 			>
+				<svg class="graph-mastery-zones" width={layout.width} height={layout.height}>
+					<defs>
+						<filter id="mastery-goo">
+							<feGaussianBlur in="SourceGraphic" stdDeviation={MASTERY_ZONE_BLUR} result="blur" />
+							<feColorMatrix
+								in="blur"
+								mode="matrix"
+								values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 18 -7"
+							/>
+						</filter>
+					</defs>
+					{#each masteryZones as zone (zone.id)}
+						<g filter="url(#mastery-goo)" class="mastery-zone-group">
+							{#each zone.nodes as node (node.fenKey)}
+								<circle cx={node.x} cy={node.y} r={MASTERY_ZONE_RADIUS} class="mastery-zone-dot" />
+							{/each}
+						</g>
+					{/each}
+				</svg>
 				<svg class="graph-edges" width={layout.width} height={layout.height}>
 					{#each layout.edges as edge (edge.id)}
 						<path d={pointsToPath(edge.points)} class="graph-edge" />
@@ -402,6 +493,22 @@
 	.graph-canvas {
 		position: relative;
 		transform-origin: 0 0;
+	}
+
+	.graph-mastery-zones {
+		position: absolute;
+		top: 0;
+		left: 0;
+		pointer-events: none;
+		overflow: visible;
+	}
+
+	.mastery-zone-group {
+		opacity: 0.32;
+	}
+
+	.mastery-zone-dot {
+		fill: var(--color-success);
 	}
 
 	.graph-edges {
