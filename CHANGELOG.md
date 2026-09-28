@@ -1,3 +1,6 @@
+**This file is no longer maintained.** It ends at version 1.3.1.
+Changes in subsequent versions are described in the [GitHub Releases](https://github.com/mio2611/Chessstack/releases).
+
 # Changelog
 
 All notable changes to Chessstack are documented here.
