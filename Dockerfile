@@ -106,6 +106,12 @@ COPY --from=seeds /seeds/ ./data/
 # (tar, minimatch, glob) that are outside our control.
 RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 
+# Commit sha, injected by CI (--build-arg). Declared late on purpose: a new
+# value on every commit only invalidates the layers that follow, not the
+# Stockfish install or node_modules copies above.
+ARG GIT_SHA=unknown
+ENV GIT_SHA=$GIT_SHA
+
 # Tell Node.js and SvelteKit this is a production environment.
 ENV NODE_ENV=production
 

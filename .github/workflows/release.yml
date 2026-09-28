@@ -10,10 +10,10 @@
 #   git push origin v1.0.0
 #
 # The workflow produces these image tags automatically:
-#   ghcr.io/pvttwinkle/chessstack:v1.0.0
-#   ghcr.io/pvttwinkle/chessstack:v1.0
-#   ghcr.io/pvttwinkle/chessstack:v1
-#   ghcr.io/pvttwinkle/chessstack:latest
+#   ghcr.io/mio2611/chessstack:v1.0.0
+#   ghcr.io/mio2611/chessstack:v1.0
+#   ghcr.io/mio2611/chessstack:v1
+#   ghcr.io/mio2611/chessstack:latest
 #
 # No secrets need to be configured — the built-in GITHUB_TOKEN has write
 # access to the repository's container registry automatically.
@@ -65,10 +65,10 @@ jobs:
 
       # Step 5: Generate Docker tags from the git tag.
       # For a tag like v1.2.3, this produces:
-      #   ghcr.io/pvttwinkle/chessstack:v1.2.3
-      #   ghcr.io/pvttwinkle/chessstack:v1.2
-      #   ghcr.io/pvttwinkle/chessstack:v1
-      #   ghcr.io/pvttwinkle/chessstack:latest
+      #   ghcr.io/mio2611/chessstack:v1.2.3
+      #   ghcr.io/mio2611/chessstack:v1.2
+      #   ghcr.io/mio2611/chessstack:v1
+      #   ghcr.io/mio2611/chessstack:latest
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -83,9 +83,6 @@ jobs:
       # Step 6: Build for amd64 + arm64 and push a single multi-arch
       # manifest to GHCR under each tag. Docker automatically pulls the
       # right platform image, no separate -amd64/-arm64 tags needed.
-      # The GitHub Actions layer cache speeds up rebuilds when only source
-      # code changes (the npm ci layer is cached), though the cache is
-      # keyed per-platform so arm64 gets its own cache lane.
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -94,5 +91,5 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          build-args: |
+            GIT_SHA=${{ github.sha }}
