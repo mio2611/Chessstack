@@ -86,4 +86,3 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 	return json({ candidates });
 };
-
