@@ -51,6 +51,9 @@
 		"ts-fsrs": "^5.2.3"
 	},
 	"overrides": {
-		"cookie": "^0.7.2"
+		"cookie": "^0.7.2",
+		"@esbuild-kit/core-utils": {
+			"esbuild": "^0.25.0"
+		}
 	}
 }
