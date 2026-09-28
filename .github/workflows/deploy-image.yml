@@ -1,9 +1,14 @@
 # GitHub Actions Deploy-Image workflow
 #
 # Builds a multi-arch Docker image (amd64 + arm64) and pushes it to GHCR
-# under the `arm64` tag every time `deploy` is updated. This is the tag
-# the NAS docker-compose.yml pulls from, so after this workflow finishes,
-# deploying to the NAS is just:
+# every time `deploy` is updated, under these tags:
+#
+#   :deploy       moving tag, always the head of `deploy` (the NAS pulls it)
+#   :sha-<short>  immutable tag for that exact commit (use it to roll back)
+#   :arm64        legacy alias of :deploy, kept only until the NAS
+#                 docker-compose.yml points to :deploy, then remove it below
+#
+# After this workflow finishes, deploying to the NAS is just:
 #
 #   docker compose pull app
 #   docker compose up -d --force-recreate app
@@ -33,7 +38,7 @@ env:
 
 jobs:
   build-and-push:
-    name: Build & Push arm64 Image
+    name: Build & Push Image
     runs-on: ubuntu-latest
 
     permissions:
@@ -57,12 +62,28 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Docker registry names must be lowercase; github.repository preserves
+      # the repo's actual casing (mio2611/Chessstack), which fails the build.
+      - name: Lowercase image name
+        run: echo "IMAGE_NAME=$(echo '${{ env.IMAGE_NAME }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=deploy
+            type=raw,value=arm64
+            type=sha,prefix=sha-,format=short
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=deploy-image
           cache-to: type=gha,mode=max,scope=deploy-image
