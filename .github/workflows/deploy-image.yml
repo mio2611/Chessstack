@@ -5,8 +5,6 @@
 #
 #   :deploy       moving tag, always the head of `deploy` (the NAS pulls it)
 #   :sha-<short>  immutable tag for that exact commit (use it to roll back)
-#   :arm64        legacy alias of :deploy, kept only until the NAS
-#                 docker-compose.yml points to :deploy, then remove it below
 #
 # After this workflow finishes, deploying to the NAS is just:
 #
@@ -74,7 +72,6 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=deploy
-            type=raw,value=arm64
             type=sha,prefix=sha-,format=short
 
       - name: Build and push
