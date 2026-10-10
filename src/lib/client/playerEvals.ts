@@ -1,6 +1,8 @@
-// Background evals of the positions reached by each candidate move in the
-// Players tab, used only to color-code those rows (good / neutral / bad vs.
-// the best evaluated move). Runs on the client Stockfish at TARGET_DEPTH,
+// Background evals of a position and of the positions reached by each of its
+// candidate moves (Players and Masters tabs), used only to color-code those
+// rows by the centipawn loss of the move for the side that plays it: the
+// eval of the parent position is the reference, so a move has the same color
+// in every tab. Runs on the client Stockfish at TARGET_DEPTH,
 // the same depth as the Engine tab, at the lowest priority: it never delays
 // the Engine tab and yields to it instantly (see evaluatePositionBackground).
 //
@@ -25,7 +27,7 @@ export const MAX_EVALUATED_MOVES = 5;
 /** A move beyond the first MIN_EVALUATED_MOVES is only evaluated if it accounts for at least this share of the games listed for the position. */
 export const MIN_GAMES_SHARE = 0.05;
 
-/** Always evaluate at least this many moves (when they exist): coloring compares against the best one, so a single eval means nothing. */
+/** Always evaluate at least this many moves (when they exist). Kept from the time the coloring compared moves with each other; the parent position is now the reference, so this only fixes how many moves get a color. */
 export const MIN_EVALUATED_MOVES = 2;
 
 /** Eval of a resulting position, in WHITE's perspective (same convention as the Engine tab). */
@@ -123,96 +125,123 @@ function remember(key: string, value: ChildEval): void {
 }
 
 export interface EvaluateChildrenOptions {
+	/**
+	 * Called once with the eval of the parent position itself, in WHITE's
+	 * perspective, before any child. It is the reference every move is
+	 * compared with: if it cannot be obtained, no child is evaluated.
+	 */
+	onParentEval: (ev: ChildEval) => void;
 	/** Called once per move as soon as its eval is known (cache hit or fresh search), in the order of `sans`. */
 	onEval: (san: string, ev: ChildEval) => void;
 	/** Polled between and during searches; return true to abandon the remaining work. */
 	isCancelled: () => boolean;
 }
 
+/** A position to evaluate: engine FEN, 4-field cache key, and the sign that flips a raw score to White's perspective. */
+interface Target {
+	fen: string;
+	key: string;
+	whiteMultiplier: 1 | -1;
+	terminal: ChildEval | null;
+}
+
+function makeTarget(chess: Chess): Target {
+	const fen = chess.fen();
+	return {
+		fen,
+		key: fenKey(fen),
+		whiteMultiplier: chess.turn() === 'w' ? 1 : -1,
+		terminal: terminalChildEval(chess)
+	};
+}
+
 /**
- * Evaluates, one at a time, the position reached by playing each of `sans`
- * from `parentFen`. Resolves when everything is evaluated, the work was
- * cancelled, or a search failed. A search preempted by an interactive
- * call is retried from scratch once the Engine tab is idle again.
+ * Eval of one position in WHITE's perspective: from the session cache, else
+ * by a background search (retried from scratch after each preemption by the
+ * Engine tab), then shared with the server cache. Resolves to null if the
+ * work was cancelled or the search failed (watchdog).
+ */
+async function resolveEval(target: Target, isCancelled: () => boolean): Promise<ChildEval | null> {
+	// Checkmate / stalemate: known without the engine, and deliberately
+	// kept out of every cache.
+	if (target.terminal) return target.terminal;
+
+	const cached = sessionCache.get(target.key);
+	if (cached) return cached;
+
+	while (!isCancelled()) {
+		await whenInteractiveIdle();
+		if (isCancelled()) return null;
+
+		const result = await evaluatePositionBackground(target.fen, isCancelled);
+		if (result.completed) {
+			const raw: ChildEval = { evalCp: result.evalCp, evalMate: result.evalMate };
+			const white = toWhite(raw, target.whiteMultiplier);
+			remember(target.key, white);
+			// A completed search is valid even if the position was left in
+			// the meantime: share it.
+			storeCachedEval(target.key, raw);
+			return white;
+		}
+		// Preempted or cancelled: loop (waits for the Engine tab, or exits
+		// if cancelled). Anything else (watchdog failure) gives up on this
+		// position only.
+		if (!result.interrupted) return null;
+	}
+	return null;
+}
+
+/**
+ * Evaluates, one at a time, `parentFen` first and then the position reached
+ * by playing each of `sans` from it. Resolves when everything is evaluated,
+ * the work was cancelled, or the parent could not be evaluated.
  */
 export async function evaluateChildren(
 	parentFen: string,
 	sans: string[],
-	{ onEval, isCancelled }: EvaluateChildrenOptions
+	{ onParentEval, onEval, isCancelled }: EvaluateChildrenOptions
 ): Promise<void> {
-	interface Child {
-		san: string;
-		childFen: string;
-		key: string;
-		whiteMultiplier: 1 | -1;
-		terminal: ChildEval | null;
+	let parent: Target;
+	try {
+		// Through chess.js so that the key is the canonical form the server
+		// cache expects, whatever shape the caller's FEN has.
+		parent = makeTarget(new Chess(parentFen));
+	} catch {
+		return;
 	}
 
-	const children: Child[] = [];
+	const children: { san: string; target: Target }[] = [];
 	for (const san of sans) {
 		try {
 			const chess = new Chess(parentFen);
 			chess.move(san);
-			const childFen = chess.fen();
-			children.push({
-				san,
-				childFen,
-				key: fenKey(childFen),
-				whiteMultiplier: chess.turn() === 'w' ? 1 : -1,
-				terminal: terminalChildEval(chess)
-			});
+			children.push({ san, target: makeTarget(chess) });
 		} catch {
 			continue;
 		}
 	}
 
 	// One batched read of the server cache for everything not already known.
-	// Checkmate / stalemate are known without the engine and deliberately
-	// kept out of every cache.
+	const targets = [parent, ...children.map((c) => c.target)];
 	const toLookUp = [
-		...new Set(children.filter((c) => !c.terminal && !sessionCache.has(c.key)).map((c) => c.key))
+		...new Set(targets.filter((t) => !t.terminal && !sessionCache.has(t.key)).map((t) => t.key))
 	];
 	if (toLookUp.length > 0 && !isCancelled()) {
 		const hits = await fetchCachedEvals(toLookUp);
-		for (const c of children) {
-			const raw = hits.get(c.key);
-			if (raw && !sessionCache.has(c.key)) remember(c.key, toWhite(raw, c.whiteMultiplier));
+		for (const t of targets) {
+			const raw = hits.get(t.key);
+			if (raw && !sessionCache.has(t.key)) remember(t.key, toWhite(raw, t.whiteMultiplier));
 		}
 	}
 
-	for (const { san, childFen, key, whiteMultiplier, terminal } of children) {
+	const parentEv = await resolveEval(parent, isCancelled);
+	if (!parentEv || isCancelled()) return;
+	onParentEval(parentEv);
+
+	for (const { san, target } of children) {
 		if (isCancelled()) return;
-
-		if (terminal) {
-			onEval(san, terminal);
-			continue;
-		}
-
-		const cached = sessionCache.get(key);
-		if (cached) {
-			onEval(san, cached);
-			continue;
-		}
-
-		while (!isCancelled()) {
-			await whenInteractiveIdle();
-			if (isCancelled()) return;
-
-			const result = await evaluatePositionBackground(childFen, isCancelled);
-			if (result.completed) {
-				const raw: ChildEval = { evalCp: result.evalCp, evalMate: result.evalMate };
-				remember(key, toWhite(raw, whiteMultiplier));
-				// A completed search is valid even if the position was left
-				// in the meantime: share it.
-				storeCachedEval(key, raw);
-				if (!isCancelled()) onEval(san, toWhite(raw, whiteMultiplier));
-				break;
-			}
-			// Preempted or cancelled: loop (waits for the Engine tab, or exits
-			// if cancelled). Anything else (watchdog failure) leaves this move
-			// uncolored rather than blocking the others.
-			if (!result.interrupted) break;
-		}
+		const ev = await resolveEval(target, isCancelled);
+		if (ev && !isCancelled()) onEval(san, ev);
 	}
 }
 

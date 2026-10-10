@@ -34,7 +34,6 @@
 		evaluateChildren,
 		cancelChildEvals,
 		selectMovesToEvaluate,
-		MIN_EVALUATED_MOVES,
 		type ChildEval
 	} from '$lib/client/playerEvals';
 	import {
@@ -50,10 +49,10 @@
 	// moment of burned CPU before being cancelled.
 	const ENGINE_DEBOUNCE_MS = 350;
 
-	// Same idea for the Players tab's child-move evals, with a longer delay:
-	// they are lower priority than the Engine tab and pointless to start for
-	// a position the user is about to leave.
-	const PLAYERS_EVAL_DEBOUNCE_MS = 600;
+	// Same idea for the child-move evals of the Players and Masters tabs, with
+	// a longer delay: they are lower priority than the Engine tab and
+	// pointless to start for a position the user is about to leave.
+	const CHILD_EVAL_DEBOUNCE_MS = 600;
 
 	interface Candidate {
 		san: string;
@@ -150,11 +149,17 @@
 	let playersMoves = $state<MastersMove[]>([]);
 	let playersLoading = $state(false);
 	let playersError = $state(false);
-	// Child-position evals for the Players tab (white's perspective), keyed by
-	// SAN of the move. Filled progressively by the effect below; a move with
-	// no entry is simply not colored.
-	const playersEvals = new SvelteMap<string, ChildEval>();
-	let playersEvalPending = $state(0);
+	// Evals (white's perspective) behind the coloring of the Players and
+	// Masters tabs: the position on screen (the reference) and the position
+	// reached by each move, keyed by SAN. Both are cleared whenever the
+	// position, the list or the tab changes, so they only ever describe the
+	// list on screen. Filled progressively by the effect below; a move with no
+	// entry, or no reference yet, is simply not colored.
+	// `moverIsWhite` is captured with the reference, from the same FEN, so the
+	// two can never disagree during a position change.
+	let parentEval = $state<{ ev: ChildEval; moverIsWhite: boolean } | null>(null);
+	const childEvals = new SvelteMap<string, ChildEval>();
+	let childEvalPending = $state(0);
 	// Local override: null means "use the prop". Set when the user picks a bracket
 	// in the dropdown; cleared when the prop catches up (after settings PATCH).
 	let ratingOverride = $state<number | null>(null);
@@ -495,38 +500,46 @@
 		};
 	});
 
-	// Colors the Players tab rows: evaluates the most played moves' resulting
-	// positions on the client (see $lib/client/playerEvals for the priority
-	// and selection rules). Restarts whenever the position, the loaded list
-	// or the tab changes; the cleanup stops the running search.
+	// Colors the Players and Masters tab rows: evaluates the current position
+	// and the positions reached by its most played moves, on the client (see
+	// $lib/client/playerEvals for the priority and selection rules, identical
+	// for both tabs). Restarts whenever the position, the loaded list or the
+	// tab changes; the cleanup stops the running search.
 	$effect(() => {
 		const fen = currentFen;
-		const moves = playersMoves;
 		const tab = activeTab;
+		const moves = tab === 'players' ? playersMoves : tab === 'masters' ? mastersMoves : [];
+		const loading = tab === 'players' ? playersLoading : mastersLoading;
+		const moverIsWhite = fen.split(' ')[1] !== 'b';
 
-		playersEvals.clear();
-		playersEvalPending = 0;
-		if (tab !== 'players' || playersLoading || moves.length === 0) return;
+		parentEval = null;
+		childEvals.clear();
+		childEvalPending = 0;
+		if ((tab !== 'players' && tab !== 'masters') || loading || moves.length === 0) return;
 
 		const sans = selectMovesToEvaluate(moves);
 		if (sans.length === 0) return;
 
 		let cancelled = false;
-		playersEvalPending = sans.length;
+		childEvalPending = sans.length;
 
 		const timer = setTimeout(() => {
 			evaluateChildren(fen, sans, {
 				isCancelled: () => cancelled,
+				onParentEval: (ev) => {
+					if (cancelled) return;
+					parentEval = { ev, moverIsWhite };
+				},
 				onEval: (san, ev) => {
 					if (cancelled) return;
-					playersEvals.set(san, ev);
-					playersEvalPending = Math.max(0, playersEvalPending - 1);
+					childEvals.set(san, ev);
+					childEvalPending = Math.max(0, childEvalPending - 1);
 				}
 			}).finally(() => {
 				// Done, or gave up on some moves: nothing more is coming.
-				if (!cancelled) playersEvalPending = 0;
+				if (!cancelled) childEvalPending = 0;
 			});
-		}, PLAYERS_EVAL_DEBOUNCE_MS);
+		}, CHILD_EVAL_DEBOUNCE_MS);
 
 		return () => {
 			cancelled = true;
@@ -617,45 +630,45 @@
 		return 'eval-equal';
 	}
 
-	// ── Players tab — background coloring by eval delta vs the best move ─────
-	// Converts a (cp, mate) pair into one comparable number, from the current
-	// player's perspective (higher = better for them), so mate scores and cp
-	// scores can be ranked against each other. Mates are pushed far outside
-	// the cp range so "mate for me" always outranks any cp score and "mate
-	// against me" always underranks any cp score.
-	function playerScore(cp: number | null, mate: number | null): number | null {
+	// ── Players and Masters tabs — background coloring by centipawn loss ─────
+	// Converts a (cp, mate) pair, in white's perspective, into one comparable
+	// number from the point of view of the side that plays the move (higher =
+	// better for them), so mate scores and cp scores can be ranked against
+	// each other. Mates are pushed far outside the cp range so "mate for the
+	// mover" always outranks any cp score and "mate against the mover" always
+	// underranks any cp score.
+	function moverScore(
+		cp: number | null,
+		mate: number | null,
+		moverIsWhite: boolean
+	): number | null {
 		if (mate !== null) {
-			const playerMate = playerColor === 'BLACK' ? -mate : mate;
-			return playerMate > 0 ? 100_000 - playerMate : -100_000 - playerMate;
+			const moverMate = moverIsWhite ? mate : -mate;
+			return moverMate > 0 ? 100_000 - moverMate : -100_000 - moverMate;
 		}
 		if (cp === null) return null;
-		return playerColor === 'BLACK' ? -cp : cp;
+		return moverIsWhite ? cp : -cp;
 	}
 
-	// Best score among the Players-tab moves evaluated so far. null until at
-	// least MIN_EVALUATED_MOVES of them have an eval (still computing, or the
-	// engine is unavailable).
-	let playersBestScore = $derived.by(() => {
-		const scores = [...playersEvals.values()]
-			.map((ev) => playerScore(ev.evalCp, ev.evalMate))
-			.filter((s): s is number => s !== null);
-		// A single eval would always color itself green: wait for a second
-		// one so the comparison means something.
-		return scores.length >= MIN_EVALUATED_MOVES ? Math.max(...scores) : null;
-	});
-
-	// Background tint for a Players-tab move, by how far its eval trails the
-	// best evaluated move: <20cp good, 20-50cp neutral, >50cp bad. Returns ''
-	// for rows outside the Players tab and for moves not (yet) evaluated.
+	// Background tint for a Players- or Masters-tab move, by how much the move
+	// costs the side that plays it compared with the position before the move:
+	// <20cp good, 20-50cp neutral, >50cp bad. The reference is the eval of the
+	// position itself, not the other moves of the list, so a move has the same
+	// color in both tabs. A negative loss can only come from search noise
+	// between the position and its moves, and counts as no loss. Returns ''
+	// for rows outside those two tabs, before the reference is known, and for
+	// moves not (yet) evaluated.
 	function moveEvalBgClass(m: MastersMove): string {
-		if (activeTab !== 'players' || playersBestScore === null) return '';
-		const ev = playersEvals.get(m.san);
+		if ((activeTab !== 'players' && activeTab !== 'masters') || parentEval === null) return '';
+		const ev = childEvals.get(m.san);
 		if (!ev) return '';
-		const score = playerScore(ev.evalCp, ev.evalMate);
-		if (score === null) return '';
-		const delta = playersBestScore - score;
-		if (delta < 20) return 'move-eval-good';
-		if (delta < 50) return 'move-eval-neutral';
+		const { moverIsWhite } = parentEval;
+		const before = moverScore(parentEval.ev.evalCp, parentEval.ev.evalMate, moverIsWhite);
+		const after = moverScore(ev.evalCp, ev.evalMate, moverIsWhite);
+		if (before === null || after === null) return '';
+		const loss = Math.max(0, before - after);
+		if (loss < 20) return 'move-eval-good';
+		if (loss < 50) return 'move-eval-neutral';
 		return 'move-eval-bad';
 	}
 
@@ -813,6 +826,9 @@
 					{@render wdlRow(m, idx)}
 				{/each}
 			</div>
+			{#if childEvalPending > 0}
+				<p class="eval-pending">Evaluating moves…</p>
+			{/if}
 		{/if}
 
 		<!-- ── Stars tab content ─────────────────────────────────────────────── -->
@@ -881,7 +897,7 @@
 					{@render wdlRow(m, idx)}
 				{/each}
 			</div>
-			{#if playersEvalPending > 0}
+			{#if childEvalPending > 0}
 				<p class="eval-pending">Evaluating moves…</p>
 			{/if}
 		{/if}
@@ -1046,7 +1062,7 @@
 		cursor: default;
 	}
 
-	/* ── Players tab — background tint by eval delta vs best move ──────────── */
+	/* ── Players and Masters tabs — background tint by centipawn loss ───────── */
 	/* Subtle tint + left border so the WDL bar underneath stays legible. */
 
 	.move-eval-good {
