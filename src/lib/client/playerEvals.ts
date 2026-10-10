@@ -28,6 +28,21 @@ export interface ChildEval {
 	evalMate: number | null;
 }
 
+/**
+ * Eval of a position where the side to move has no legal move, in WHITE's
+ * perspective, or null for any other position. The engine cannot be asked
+ * about those: it answers "info depth 0" without a depth-20 result, which
+ * would leave the move uncolored (the mating move is the best one) and,
+ * for mate 0, lose the sign once flipped to White's perspective. A
+ * delivered mate is reported as mate 1 for the side that delivered it: it
+ * ties with a forced mate in one, which is fine for the coloring.
+ */
+export function terminalChildEval(chess: Chess): ChildEval | null {
+	if (chess.isCheckmate()) return { evalCp: null, evalMate: chess.turn() === 'b' ? 1 : -1 };
+	if (chess.isStalemate()) return { evalCp: 0, evalMate: null };
+	return null;
+}
+
 interface MoveStat {
 	san: string;
 	totalGames: number;
@@ -89,12 +104,21 @@ export async function evaluateChildren(
 
 		let childFen: string;
 		let whiteMultiplier: 1 | -1;
+		let terminal: ChildEval | null;
 		try {
 			const chess = new Chess(parentFen);
 			chess.move(san);
 			childFen = chess.fen();
 			whiteMultiplier = chess.turn() === 'w' ? 1 : -1;
+			terminal = terminalChildEval(chess);
 		} catch {
+			continue;
+		}
+
+		// Checkmate / stalemate: known without the engine, and deliberately
+		// kept out of every cache.
+		if (terminal) {
+			onEval(san, terminal);
 			continue;
 		}
 
