@@ -29,6 +29,14 @@
 <script lang="ts">
 	import { RATING_BRACKETS, DEFAULT_BRACKET_ID } from '$lib/ratings';
 	import { Chess } from 'chess.js';
+	import { SvelteMap } from 'svelte/reactivity';
+	import {
+		evaluateChildren,
+		cancelChildEvals,
+		selectMovesToEvaluate,
+		MIN_EVALUATED_MOVES,
+		type ChildEval
+	} from '$lib/client/playerEvals';
 	import {
 		evaluatePositionMultiPv,
 		TARGET_DEPTH as ENGINE_TARGET_DEPTH
@@ -41,6 +49,11 @@
 	// flag) but still costing a wasted ucinewgame/isready round-trip and a
 	// moment of burned CPU before being cancelled.
 	const ENGINE_DEBOUNCE_MS = 350;
+
+	// Same idea for the Players tab's child-move evals, with a longer delay:
+	// they are lower priority than the Engine tab and pointless to start for
+	// a position the user is about to leave.
+	const PLAYERS_EVAL_DEBOUNCE_MS = 600;
 
 	interface Candidate {
 		san: string;
@@ -60,9 +73,6 @@
 		draws: number;
 		black: number;
 		totalGames: number;
-		// Only populated for Players-tab rows (see moveEvalBgClass below).
-		evalCp?: number | null;
-		evalMate?: number | null;
 	}
 
 	interface Props {
@@ -140,6 +150,11 @@
 	let playersMoves = $state<MastersMove[]>([]);
 	let playersLoading = $state(false);
 	let playersError = $state(false);
+	// Child-position evals for the Players tab (white's perspective), keyed by
+	// SAN of the move. Filled progressively by the effect below; a move with
+	// no entry is simply not colored.
+	const playersEvals = new SvelteMap<string, ChildEval>();
+	let playersEvalPending = $state(0);
 	// Local override: null means "use the prop". Set when the user picks a bracket
 	// in the dropdown; cleared when the prop catches up (after settings PATCH).
 	let ratingOverride = $state<number | null>(null);
@@ -480,6 +495,46 @@
 		};
 	});
 
+	// Colors the Players tab rows: evaluates the most played moves' resulting
+	// positions on the client (see $lib/client/playerEvals for the priority
+	// and selection rules). Restarts whenever the position, the loaded list
+	// or the tab changes; the cleanup stops the running search.
+	$effect(() => {
+		const fen = currentFen;
+		const moves = playersMoves;
+		const tab = activeTab;
+
+		playersEvals.clear();
+		playersEvalPending = 0;
+		if (tab !== 'players' || playersLoading || moves.length === 0) return;
+
+		const sans = selectMovesToEvaluate(moves);
+		if (sans.length === 0) return;
+
+		let cancelled = false;
+		playersEvalPending = sans.length;
+
+		const timer = setTimeout(() => {
+			evaluateChildren(fen, sans, {
+				isCancelled: () => cancelled,
+				onEval: (san, ev) => {
+					if (cancelled) return;
+					playersEvals.set(san, ev);
+					playersEvalPending = Math.max(0, playersEvalPending - 1);
+				}
+			}).finally(() => {
+				// Done, or gave up on some moves: nothing more is coming.
+				if (!cancelled) playersEvalPending = 0;
+			});
+		}, PLAYERS_EVAL_DEBOUNCE_MS);
+
+		return () => {
+			cancelled = true;
+			clearTimeout(timer);
+			cancelChildEvals();
+		};
+	});
+
 	// ── Stars fetch — local celebrity DB, instant response ───────────────────
 	// Fetches move statistics for a specific famous player when the Stars tab
 	// is active. Re-fetches when the selected player changes.
@@ -577,22 +632,26 @@
 		return playerColor === 'BLACK' ? -cp : cp;
 	}
 
-	// Best score among the currently loaded Players-tab moves. null if none
-	// of them have an eval yet (still loading, or the engine is unavailable).
+	// Best score among the Players-tab moves evaluated so far. null until at
+	// least MIN_EVALUATED_MOVES of them have an eval (still computing, or the
+	// engine is unavailable).
 	let playersBestScore = $derived.by(() => {
-		const scores = playersMoves
-			.map((m) => playerScore(m.evalCp ?? null, m.evalMate ?? null))
+		const scores = [...playersEvals.values()]
+			.map((ev) => playerScore(ev.evalCp, ev.evalMate))
 			.filter((s): s is number => s !== null);
-		return scores.length > 0 ? Math.max(...scores) : null;
+		// A single eval would always color itself green: wait for a second
+		// one so the comparison means something.
+		return scores.length >= MIN_EVALUATED_MOVES ? Math.max(...scores) : null;
 	});
 
 	// Background tint for a Players-tab move, by how far its eval trails the
 	// best evaluated move: <20cp good, 20-50cp neutral, >50cp bad. Returns ''
-	// for Masters/Stars rows (evalCp is undefined there — not computed) so
-	// this only ever affects the Players tab.
+	// for rows outside the Players tab and for moves not (yet) evaluated.
 	function moveEvalBgClass(m: MastersMove): string {
-		if (m.evalCp === undefined || playersBestScore === null) return '';
-		const score = playerScore(m.evalCp ?? null, m.evalMate ?? null);
+		if (activeTab !== 'players' || playersBestScore === null) return '';
+		const ev = playersEvals.get(m.san);
+		if (!ev) return '';
+		const score = playerScore(ev.evalCp, ev.evalMate);
 		if (score === null) return '';
 		const delta = playersBestScore - score;
 		if (delta < 20) return 'move-eval-good';
@@ -822,6 +881,9 @@
 					{@render wdlRow(m, idx)}
 				{/each}
 			</div>
+			{#if playersEvalPending > 0}
+				<p class="eval-pending">Evaluating moves…</p>
+			{/if}
 		{/if}
 
 		<!-- ── Engine tab content ────────────────────────────────────────────── -->
@@ -926,6 +988,12 @@
 		font-size: 12px;
 		color: var(--color-text-muted);
 		font-style: italic;
+	}
+
+	.eval-pending {
+		margin: 0.25rem 0 0;
+		font-size: 0.75rem;
+		opacity: 0.6;
 	}
 
 	.empty-hint {

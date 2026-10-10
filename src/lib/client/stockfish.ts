@@ -55,6 +55,8 @@ export interface EvalResult {
 	depthReached: number;
 	/** True if depthReached >= TARGET_DEPTH. False if the watchdog fired first. */
 	completed: boolean;
+	/** Only set by evaluatePositionBackground: the search was stopped on purpose (preempted or cancelled), not by the watchdog. */
+	interrupted?: boolean;
 }
 
 let worker: Worker | null = null;
@@ -90,6 +92,66 @@ function nextInteractiveRequestId(): number {
 		getWorker().postMessage('stop');
 	}
 	return id;
+}
+
+// ── Background searches (child-move evals for the Players tab) ───────────
+// Lowest priority: they never supersede anything, and any foreground call
+// (every evaluatePosition / evaluatePositionMultiPv call, interactive or
+// batch) or an explicit stopBackgroundSearch interrupts them. An
+// interrupted background search resolves with completed: false and
+// interrupted: true so the caller can tell "preempted, retry later" from a
+// watchdog failure.
+//
+// A background search is never anybody's watched result, so cutting it
+// short is safe for batch callers too: unlike an interactive search, it is
+// never something a batch caller persists as a complete depth-20 result.
+let backgroundRunning = false;
+let backgroundStopRequested = false;
+
+// Bumped by every stopBackgroundSearch(). A background call captures the
+// value when it is made and gives up as soon as it changes, which covers
+// the window where the stop finds nothing to interrupt: the call is still
+// waiting in the queue, or the engine is still initializing.
+let backgroundEpoch = 0;
+
+/** Stop the background search that is running right now, if any, and abandon any that is queued. */
+export function stopBackgroundSearch(): void {
+	backgroundEpoch++;
+	if (!backgroundRunning) return;
+	backgroundStopRequested = true;
+	getWorker().postMessage('stop');
+}
+
+// Number of foreground calls (interactive or batch) issued but not yet
+// settled. Background callers await whenInteractiveIdle() before
+// enqueueing, so they never queue ahead of a search somebody is waiting on.
+let foregroundInFlight = 0;
+let idleWaiters: Array<() => void> = [];
+
+function foregroundStarted(): void {
+	foregroundInFlight++;
+	// A foreground call outranks any background search: cut it short so
+	// this call does not wait for a depth-20 search nobody is looking at.
+	stopBackgroundSearch();
+}
+
+function foregroundSettled(): void {
+	foregroundInFlight--;
+	if (foregroundInFlight === 0) {
+		const waiters = idleWaiters;
+		idleWaiters = [];
+		for (const resolve of waiters) resolve();
+	}
+}
+
+/** Resolves once no foreground search (interactive or batch) is pending or running. */
+export async function whenInteractiveIdle(): Promise<void> {
+	// Re-checked after every wake-up: a foreground call issued in the same
+	// tick as the last one settling (e.g. the next position of a batch
+	// scan) must not be overtaken by the caller that was waiting.
+	while (foregroundInFlight > 0) {
+		await new Promise<void>((resolve) => idleWaiters.push(resolve));
+	}
 }
 
 /** True if a newer interactive call has been made since this one started waiting in the queue — this call's result is stale and should not touch the engine. */
@@ -205,10 +267,61 @@ export function evaluatePosition(
 	fen: string,
 	onProgress?: (p: EvalProgress) => void
 ): Promise<EvalResult> {
+	return evaluatePositionInternal(fen, onProgress, null);
+}
+
+/**
+ * Same search as evaluatePosition, at the lowest priority. Meant for
+ * speculative evals (Players tab child moves): `isCancelled` is checked
+ * before the search starts, and stopBackgroundSearch() or any foreground
+ * call (interactive or batch) interrupts it, including while it is still
+ * queued or the engine is initializing (result: completed false,
+ * interrupted true). Callers should await whenInteractiveIdle() first so
+ * they do not queue ahead of a foreground search.
+ */
+export function evaluatePositionBackground(
+	fen: string,
+	isCancelled: () => boolean
+): Promise<EvalResult> {
+	return evaluatePositionInternal(fen, undefined, isCancelled);
+}
+
+function evaluatePositionInternal(
+	fen: string,
+	onProgress: ((p: EvalProgress) => void) | undefined,
+	isCancelled: (() => boolean) | null
+): Promise<EvalResult> {
+	const background = isCancelled !== null;
+	// See backgroundEpoch: captured now, at call time.
+	const epoch = backgroundEpoch;
+	const shouldAbort = (): boolean =>
+		background && (epoch !== backgroundEpoch || (isCancelled?.() ?? false));
+	if (!background) foregroundStarted();
+	const interruptedResult: EvalResult = {
+		evalCp: null,
+		evalMate: null,
+		bestMoveUci: null,
+		bestMoveSan: null,
+		depthReached: 0,
+		completed: false,
+		interrupted: true
+	};
+
 	const run = async (): Promise<EvalResult> => {
+		if (shouldAbort()) return interruptedResult;
+
 		const w = getWorker();
 		if (!readyPromise) readyPromise = ensureReady(w);
 		await readyPromise;
+
+		if (background) {
+			// A stop requested while this call was queued or the engine was
+			// initializing found nothing to interrupt (backgroundRunning was
+			// still false): check again before claiming the engine.
+			if (shouldAbort()) return interruptedResult;
+			backgroundRunning = true;
+			backgroundStopRequested = false;
+		}
 
 		let evalCp: number | null = null;
 		let evalMate: number | null = null;
@@ -218,11 +331,17 @@ export function evaluatePosition(
 		// carries over stale entries from whatever was searched before,
 		// producing a different score/bestmove for a nominally identical
 		// depth-20 search depending purely on evaluation order.
-		await resetForNewSearch(w, 1);
-		w.postMessage(`position fen ${fen}`);
-		w.postMessage(`go depth ${TARGET_DEPTH}`);
-
 		try {
+			await resetForNewSearch(w, 1);
+			w.postMessage(`position fen ${fen}`);
+			w.postMessage(`go depth ${TARGET_DEPTH}`);
+			// A stop requested while we were still in resetForNewSearch was
+			// ignored by the engine (nothing was searching yet): repeat it.
+			if (background && (backgroundStopRequested || shouldAbort())) {
+				backgroundStopRequested = true;
+				w.postMessage('stop');
+			}
+
 			const bestmoveLine = await waitFor(
 				w,
 				(l) => BESTMOVE_RE.test(l),
@@ -247,13 +366,15 @@ export function evaluatePosition(
 
 			const bestMoveUci = BESTMOVE_RE.exec(bestmoveLine)?.[1] ?? null;
 
+			const completed = depthReached >= TARGET_DEPTH;
 			return {
 				evalCp,
 				evalMate,
 				bestMoveUci,
 				bestMoveSan: bestMoveUci ? uciToSan(fen, bestMoveUci) : null,
 				depthReached,
-				completed: depthReached >= TARGET_DEPTH
+				completed,
+				...(background ? { interrupted: !completed && backgroundStopRequested } : {})
 			};
 		} catch (err) {
 			if (err instanceof Error && err.message === 'stockfish-watchdog-timeout') {
@@ -270,12 +391,18 @@ export function evaluatePosition(
 				};
 			}
 			throw err;
+		} finally {
+			if (background) {
+				backgroundRunning = false;
+				backgroundStopRequested = false;
+			}
 		}
 	};
 
 	const result = queue.then(run, run);
 	// Swallow so a failed evaluation doesn't poison the queue for the next call.
 	queue = result.catch(() => undefined);
+	if (!background) result.then(foregroundSettled, foregroundSettled);
 	return result;
 }
 
@@ -318,6 +445,7 @@ export function evaluatePositionMultiPv(
 	interactive = false
 ): Promise<MultiPvLine[]> {
 	const requestId = interactive ? nextInteractiveRequestId() : null;
+	foregroundStarted();
 
 	const run = async (): Promise<MultiPvLine[]> => {
 		if (requestId !== null && isInteractiveSuperseded(requestId)) return [];
@@ -382,5 +510,6 @@ export function evaluatePositionMultiPv(
 
 	const result = queue.then(run, run);
 	queue = result.catch(() => undefined);
+	result.then(foregroundSettled, foregroundSettled);
 	return result;
 }
