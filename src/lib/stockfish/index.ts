@@ -66,7 +66,7 @@ export interface TopMovesResult {
 //              evaluations that must reach a target depth reliably rather
 //              than complete within a fixed wall-clock budget (e.g. a
 //              single post-game evaluation). Leave unset for interactive
-//              callers that need a bounded response time (e.g. evalCache).
+//              callers that need a bounded response time.
 //
 // Returns { moves: [], completed: false } without throwing if the engine is
 // unavailable.
@@ -125,8 +125,8 @@ export async function getTopMoves(
 		// Safety net: if analysis takes too long, return partial results rather
 		// than hanging the request indefinitely. Not a real completion.
 		//
-		// Without watchdogMs, this is a plain one-shot timer (existing behaviour,
-		// e.g. evalCache): it fires once, at timeoutMs, regardless of progress.
+		// Without watchdogMs, this is a plain one-shot timer (existing behaviour):
+		// it fires once, at timeoutMs, regardless of progress.
 		//
 		// With watchdogMs, rearmWatchdog() below resets it on every depth
 		// increase, so it only fires after watchdogMs of no progress at all.
