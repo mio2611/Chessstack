@@ -4,6 +4,12 @@
 // the same depth as the Engine tab, at the lowest priority: it never delays
 // the Engine tab and yields to it instantly (see evaluatePositionBackground).
 //
+// Completed evals are shared through the server cache (/api/players/evals,
+// table position_eval_cache): read in one batch before any search, written
+// after each completed search. The cache holds RAW scores (side to move of
+// the evaluated position); the flip to White's perspective happens only in
+// toWhite() below.
+//
 // Deliberately separate from the Engine tab's MultiPV scores: those come
 // from a search of the PARENT position and are not comparable with a
 // depth-20 search of each CHILD position at the 20 cp granularity used for
@@ -68,8 +74,43 @@ export function selectMovesToEvaluate(moves: MoveStat[]): string[] {
 	return selected;
 }
 
-// Session-lifetime cache of completed depth-20 evals, keyed by the 4-field
-// FEN of the resulting position. Only completed searches are stored.
+const EVALS_ENDPOINT = '/api/players/evals';
+
+/** Raw engine score (side to move of the evaluated position) to White's perspective. The only place this flip is done. */
+function toWhite(raw: ChildEval, whiteMultiplier: 1 | -1): ChildEval {
+	return {
+		evalCp: raw.evalCp !== null ? raw.evalCp * whiteMultiplier : null,
+		evalMate: raw.evalMate !== null ? raw.evalMate * whiteMultiplier : null
+	};
+}
+
+/** Reads cached RAW evals for `keys` (4-field FENs) in one request. Any failure yields an empty map: the cache is an optimisation, never a dependency. */
+async function fetchCachedEvals(keys: string[]): Promise<Map<string, ChildEval>> {
+	const found = new Map<string, ChildEval>();
+	try {
+		const query = keys.map((k) => `fen=${encodeURIComponent(k)}`).join('&');
+		const res = await fetch(`${EVALS_ENDPOINT}?${query}`);
+		if (!res.ok) return found;
+		const data = (await res.json()) as { evals?: Record<string, ChildEval> };
+		for (const [key, ev] of Object.entries(data.evals ?? {})) found.set(key, ev);
+	} catch {
+		// Offline, session expired, server error: fall back to local searches.
+	}
+	return found;
+}
+
+/** Stores a completed RAW eval, fire and forget: a failed write only means the position is recomputed next time. */
+function storeCachedEval(key: string, raw: ChildEval): void {
+	fetch(EVALS_ENDPOINT, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ fen: key, evalCp: raw.evalCp, evalMate: raw.evalMate })
+	}).catch(() => {});
+}
+
+// Session-lifetime cache of completed depth-20 evals in WHITE's perspective,
+// keyed by the 4-field FEN of the resulting position. Only completed
+// searches (local or read from the server cache) are stored.
 const MAX_CACHE_ENTRIES = 2000;
 const sessionCache = new Map<string, ChildEval>();
 
@@ -99,30 +140,54 @@ export async function evaluateChildren(
 	sans: string[],
 	{ onEval, isCancelled }: EvaluateChildrenOptions
 ): Promise<void> {
-	for (const san of sans) {
-		if (isCancelled()) return;
+	interface Child {
+		san: string;
+		childFen: string;
+		key: string;
+		whiteMultiplier: 1 | -1;
+		terminal: ChildEval | null;
+	}
 
-		let childFen: string;
-		let whiteMultiplier: 1 | -1;
-		let terminal: ChildEval | null;
+	const children: Child[] = [];
+	for (const san of sans) {
 		try {
 			const chess = new Chess(parentFen);
 			chess.move(san);
-			childFen = chess.fen();
-			whiteMultiplier = chess.turn() === 'w' ? 1 : -1;
-			terminal = terminalChildEval(chess);
+			const childFen = chess.fen();
+			children.push({
+				san,
+				childFen,
+				key: fenKey(childFen),
+				whiteMultiplier: chess.turn() === 'w' ? 1 : -1,
+				terminal: terminalChildEval(chess)
+			});
 		} catch {
 			continue;
 		}
+	}
 
-		// Checkmate / stalemate: known without the engine, and deliberately
-		// kept out of every cache.
+	// One batched read of the server cache for everything not already known.
+	// Checkmate / stalemate are known without the engine and deliberately
+	// kept out of every cache.
+	const toLookUp = [
+		...new Set(children.filter((c) => !c.terminal && !sessionCache.has(c.key)).map((c) => c.key))
+	];
+	if (toLookUp.length > 0 && !isCancelled()) {
+		const hits = await fetchCachedEvals(toLookUp);
+		for (const c of children) {
+			const raw = hits.get(c.key);
+			if (raw && !sessionCache.has(c.key)) remember(c.key, toWhite(raw, c.whiteMultiplier));
+		}
+	}
+
+	for (const { san, childFen, key, whiteMultiplier, terminal } of children) {
+		if (isCancelled()) return;
+
 		if (terminal) {
 			onEval(san, terminal);
 			continue;
 		}
 
-		const key = fenKey(childFen);
 		const cached = sessionCache.get(key);
 		if (cached) {
 			onEval(san, cached);
@@ -135,12 +200,12 @@ export async function evaluateChildren(
 
 			const result = await evaluatePositionBackground(childFen, isCancelled);
 			if (result.completed) {
-				const ev: ChildEval = {
-					evalCp: result.evalCp !== null ? result.evalCp * whiteMultiplier : null,
-					evalMate: result.evalMate !== null ? result.evalMate * whiteMultiplier : null
-				};
-				remember(key, ev);
-				if (!isCancelled()) onEval(san, ev);
+				const raw: ChildEval = { evalCp: result.evalCp, evalMate: result.evalMate };
+				remember(key, toWhite(raw, whiteMultiplier));
+				// A completed search is valid even if the position was left
+				// in the meantime: share it.
+				storeCachedEval(key, raw);
+				if (!isCancelled()) onEval(san, toWhite(raw, whiteMultiplier));
 				break;
 			}
 			// Preempted or cancelled: loop (waits for the Engine tab, or exits

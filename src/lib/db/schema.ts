@@ -160,12 +160,18 @@ export const celebrityMoves = pgTable(
 //
 // Not user-scoped: a Stockfish eval of a position is objective, so every
 // user on the same instance shares one cache entry per (fen, depth). The
-// depth column is part of what identifies an entry so that a future change
-// to POSITION_EVAL_DEPTH does not collide with entries computed at a
-// different depth.
+// depth column is part of what identifies an entry so that a change of
+// EVAL_DEPTH in /api/players/evals does not collide with entries computed at
+// a different depth. Only that depth (20) is read; rows at another depth
+// (14, from an earlier server-side version) are never read and can be left
+// in place.
 //
-// Populated lazily on first view (see $lib/stockfish/evalCache.ts) —
-// never pre-seeded, unlike the shared book tables above.
+// fen is the 4-field FEN; eval_cp / eval_mate are RAW, from the perspective
+// of the side to move in fen (Stockfish's convention), not White's.
+//
+// Populated lazily by the client when the Players tab is viewed (see
+// /api/players/evals and $lib/client/playerEvals.ts) — never pre-seeded,
+// unlike the shared book tables above.
 export const positionEvalCache = pgTable(
 	'position_eval_cache',
 	{
