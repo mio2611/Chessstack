@@ -55,6 +55,8 @@ export interface EvalResult {
 	depthReached: number;
 	/** True if depthReached >= TARGET_DEPTH. False if the watchdog fired first. */
 	completed: boolean;
+	/** Only set by evaluatePositionBackground: the search was stopped on purpose (preempted or cancelled), not by the watchdog. */
+	interrupted?: boolean;
 }
 
 let worker: Worker | null = null;
@@ -89,7 +91,47 @@ function nextInteractiveRequestId(): number {
 	if (activeInteractiveRequestId !== null && activeInteractiveRequestId !== id) {
 		getWorker().postMessage('stop');
 	}
+	// An interactive request outranks any background search currently
+	// running (see evaluatePositionBackground): cut it short so this call
+	// does not wait for a depth-20 search nobody is looking at.
+	stopBackgroundSearch();
 	return id;
+}
+
+// ── Background searches (child-move evals for the Players tab) ───────────
+// Lowest priority: they never supersede anything, and any interactive call
+// (or an explicit stopBackgroundSearch) interrupts them. An interrupted
+// background search resolves with completed: false and interrupted: true so
+// the caller can tell "preempted, retry later" from a watchdog failure.
+let backgroundRunning = false;
+let backgroundStopRequested = false;
+
+/** Stop the background search that is running right now, if any. No-op otherwise. */
+export function stopBackgroundSearch(): void {
+	if (!backgroundRunning) return;
+	backgroundStopRequested = true;
+	getWorker().postMessage('stop');
+}
+
+// Number of interactive calls issued but not yet settled. Background
+// callers await whenInteractiveIdle() before enqueueing, so they never
+// queue ahead of a search the user is actually watching.
+let interactiveInFlight = 0;
+let idleWaiters: Array<() => void> = [];
+
+function interactiveSettled(): void {
+	interactiveInFlight--;
+	if (interactiveInFlight === 0) {
+		const waiters = idleWaiters;
+		idleWaiters = [];
+		for (const resolve of waiters) resolve();
+	}
+}
+
+/** Resolves once no interactive search is pending or running. */
+export function whenInteractiveIdle(): Promise<void> {
+	if (interactiveInFlight === 0) return Promise.resolve();
+	return new Promise((resolve) => idleWaiters.push(resolve));
 }
 
 /** True if a newer interactive call has been made since this one started waiting in the queue — this call's result is stale and should not touch the engine. */
@@ -205,10 +247,51 @@ export function evaluatePosition(
 	fen: string,
 	onProgress?: (p: EvalProgress) => void
 ): Promise<EvalResult> {
+	return evaluatePositionInternal(fen, onProgress, null);
+}
+
+/**
+ * Same search as evaluatePosition, at the lowest priority. Meant for
+ * speculative evals (Players tab child moves): `isCancelled` is checked
+ * before the search starts, and stopBackgroundSearch() or any interactive
+ * call interrupts it mid-search (result: completed false, interrupted true).
+ * Callers should await whenInteractiveIdle() first so they do not queue
+ * ahead of an interactive search.
+ */
+export function evaluatePositionBackground(
+	fen: string,
+	isCancelled: () => boolean
+): Promise<EvalResult> {
+	return evaluatePositionInternal(fen, undefined, isCancelled);
+}
+
+function evaluatePositionInternal(
+	fen: string,
+	onProgress: ((p: EvalProgress) => void) | undefined,
+	isCancelled: (() => boolean) | null
+): Promise<EvalResult> {
+	const background = isCancelled !== null;
+	const interruptedResult: EvalResult = {
+		evalCp: null,
+		evalMate: null,
+		bestMoveUci: null,
+		bestMoveSan: null,
+		depthReached: 0,
+		completed: false,
+		interrupted: true
+	};
+
 	const run = async (): Promise<EvalResult> => {
+		if (background && isCancelled()) return interruptedResult;
+
 		const w = getWorker();
 		if (!readyPromise) readyPromise = ensureReady(w);
 		await readyPromise;
+
+		if (background) {
+			backgroundRunning = true;
+			backgroundStopRequested = false;
+		}
 
 		let evalCp: number | null = null;
 		let evalMate: number | null = null;
@@ -218,11 +301,17 @@ export function evaluatePosition(
 		// carries over stale entries from whatever was searched before,
 		// producing a different score/bestmove for a nominally identical
 		// depth-20 search depending purely on evaluation order.
-		await resetForNewSearch(w, 1);
-		w.postMessage(`position fen ${fen}`);
-		w.postMessage(`go depth ${TARGET_DEPTH}`);
-
 		try {
+			await resetForNewSearch(w, 1);
+			w.postMessage(`position fen ${fen}`);
+			w.postMessage(`go depth ${TARGET_DEPTH}`);
+			// A stop requested while we were still in resetForNewSearch was
+			// ignored by the engine (nothing was searching yet): repeat it.
+			if (background && (backgroundStopRequested || isCancelled())) {
+				backgroundStopRequested = true;
+				w.postMessage('stop');
+			}
+
 			const bestmoveLine = await waitFor(
 				w,
 				(l) => BESTMOVE_RE.test(l),
@@ -247,13 +336,15 @@ export function evaluatePosition(
 
 			const bestMoveUci = BESTMOVE_RE.exec(bestmoveLine)?.[1] ?? null;
 
+			const completed = depthReached >= TARGET_DEPTH;
 			return {
 				evalCp,
 				evalMate,
 				bestMoveUci,
 				bestMoveSan: bestMoveUci ? uciToSan(fen, bestMoveUci) : null,
 				depthReached,
-				completed: depthReached >= TARGET_DEPTH
+				completed,
+				...(background ? { interrupted: !completed && backgroundStopRequested } : {})
 			};
 		} catch (err) {
 			if (err instanceof Error && err.message === 'stockfish-watchdog-timeout') {
@@ -270,6 +361,11 @@ export function evaluatePosition(
 				};
 			}
 			throw err;
+		} finally {
+			if (background) {
+				backgroundRunning = false;
+				backgroundStopRequested = false;
+			}
 		}
 	};
 
@@ -318,6 +414,7 @@ export function evaluatePositionMultiPv(
 	interactive = false
 ): Promise<MultiPvLine[]> {
 	const requestId = interactive ? nextInteractiveRequestId() : null;
+	if (interactive) interactiveInFlight++;
 
 	const run = async (): Promise<MultiPvLine[]> => {
 		if (requestId !== null && isInteractiveSuperseded(requestId)) return [];
@@ -382,5 +479,6 @@ export function evaluatePositionMultiPv(
 
 	const result = queue.then(run, run);
 	queue = result.catch(() => undefined);
+	if (interactive) result.then(interactiveSettled, interactiveSettled);
 	return result;
 }
