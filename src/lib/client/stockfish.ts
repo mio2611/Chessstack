@@ -159,6 +159,18 @@ function isInteractiveSuperseded(requestId: number): boolean {
 	return requestId !== latestInteractiveRequestId;
 }
 
+/**
+ * Stops the interactive (Engine tab) search in progress, if any, and makes
+ * any queued interactive call resolve empty without searching. For a caller
+ * that answers a position from its own cache and so issues no interactive
+ * call: without this, the search of the position just left would keep
+ * running to the target depth for nothing. Does not touch background
+ * searches (the Players / Masters coloring), which must keep going.
+ */
+export function cancelInteractiveSearches(): void {
+	nextInteractiveRequestId();
+}
+
 function getWorker(): Worker {
 	if (!worker) {
 		worker = new Worker(ENGINE_URL);

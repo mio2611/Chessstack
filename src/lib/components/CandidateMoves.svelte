@@ -38,8 +38,11 @@
 	} from '$lib/client/playerEvals';
 	import {
 		evaluatePositionMultiPv,
-		TARGET_DEPTH as ENGINE_TARGET_DEPTH
+		cancelInteractiveSearches,
+		TARGET_DEPTH as ENGINE_TARGET_DEPTH,
+		type MultiPvLine
 	} from '$lib/client/stockfish';
+	import { getCachedEngineLines, cacheEngineLines } from '$lib/client/engineCache';
 
 	// How long to wait after the position stops changing before starting a
 	// depth-20 search. Without this, clicking through several positions in
@@ -48,6 +51,9 @@
 	// flag) but still costing a wasted ucinewgame/isready round-trip and a
 	// moment of burned CPU before being cancelled.
 	const ENGINE_DEBOUNCE_MS = 350;
+
+	// Number of lines the Engine tab asks for (and part of the cache key).
+	const ENGINE_LINES = 3;
 
 	// Same idea for the child-move evals of the Players and Masters tabs, with
 	// a longer delay: they are lower priority than the Engine tab and
@@ -327,6 +333,21 @@
 		};
 	});
 
+	// Shows MultiPV lines (RAW, side to move) in the Engine tab, flipped to
+	// white's perspective. Shared by a fresh search and a cache hit.
+	function applyEngineLines(lines: MultiPvLine[], whiteMultiplier: 1 | -1): void {
+		engineCandidates = lines.map((l) => ({
+			san: l.moveSan ?? l.moveUci,
+			uci: l.moveUci,
+			evalCp: l.evalCp != null ? l.evalCp * whiteMultiplier : null,
+			evalMate: l.evalMate != null ? l.evalMate * whiteMultiplier : null,
+			isBook: false,
+			annotation: null,
+			openingName: null
+		}));
+		engineAvailable = true;
+	}
+
 	// ── Engine — client-side Stockfish (WASM, depth-20 fixed, no server round-trip) ──
 	// Runs entirely in the browser via $lib/client/stockfish — see that
 	// module for the depth/watchdog/perspective rationale. `interactive:
@@ -337,6 +358,30 @@
 	$effect(() => {
 		const fen = currentFen;
 		let cancelled = false;
+
+		// Same position as an earlier, finished search: show it at once, with
+		// no debounce and no engine call. The search of the position just
+		// left must still be stopped, or it would keep running to depth 20
+		// and delay the Players / Masters coloring.
+		const cachedLines = getCachedEngineLines(fen, ENGINE_LINES);
+		if (cachedLines) {
+			let multiplier: 1 | -1 | null = null;
+			try {
+				multiplier = new Chess(fen).turn() === 'w' ? 1 : -1;
+			} catch {
+				// Unusable FEN: take the normal path below, which reports it.
+			}
+			if (multiplier !== null) {
+				cancelInteractiveSearches();
+				engineError = false;
+				engineDepth = ENGINE_TARGET_DEPTH;
+				engineMaxDepth = ENGINE_TARGET_DEPTH;
+				engineCompleted = true;
+				applyEngineLines(cachedLines, multiplier);
+				engineLoading = false;
+				return;
+			}
+		}
 
 		engineLoading = true;
 		engineError = false;
@@ -357,7 +402,7 @@
 
 			evaluatePositionMultiPv(
 				fen,
-				3,
+				ENGINE_LINES,
 				({ depth }) => {
 					if (cancelled) return;
 					engineDepth = depth;
@@ -378,17 +423,11 @@
 						return;
 					}
 
-					engineCandidates = lines.map((l) => ({
-						san: l.moveSan ?? l.moveUci,
-						uci: l.moveUci,
-						evalCp: l.evalCp != null ? l.evalCp * whiteMultiplier : null,
-						evalMate: l.evalMate != null ? l.evalMate * whiteMultiplier : null,
-						isBook: false,
-						annotation: null,
-						openingName: null
-					}));
-					engineAvailable = true;
+					applyEngineLines(lines, whiteMultiplier);
 					engineCompleted = engineDepth >= ENGINE_TARGET_DEPTH;
+					// Only a search that reached the target depth is reusable:
+					// a cut-short one would be shown later as if it were complete.
+					if (engineCompleted) cacheEngineLines(fen, ENGINE_LINES, lines);
 					engineLoading = false;
 				})
 				.catch(() => {
