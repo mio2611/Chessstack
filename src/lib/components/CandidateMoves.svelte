@@ -29,10 +29,20 @@
 <script lang="ts">
 	import { RATING_BRACKETS, DEFAULT_BRACKET_ID } from '$lib/ratings';
 	import { Chess } from 'chess.js';
+	import { SvelteMap } from 'svelte/reactivity';
+	import {
+		evaluateChildren,
+		cancelChildEvals,
+		selectMovesToEvaluate,
+		type ChildEval
+	} from '$lib/client/playerEvals';
 	import {
 		evaluatePositionMultiPv,
-		TARGET_DEPTH as ENGINE_TARGET_DEPTH
+		cancelInteractiveSearches,
+		TARGET_DEPTH as ENGINE_TARGET_DEPTH,
+		type MultiPvLine
 	} from '$lib/client/stockfish';
+	import { getCachedEngineLines, cacheEngineLines } from '$lib/client/engineCache';
 
 	// How long to wait after the position stops changing before starting a
 	// depth-20 search. Without this, clicking through several positions in
@@ -41,6 +51,14 @@
 	// flag) but still costing a wasted ucinewgame/isready round-trip and a
 	// moment of burned CPU before being cancelled.
 	const ENGINE_DEBOUNCE_MS = 350;
+
+	// Number of lines the Engine tab asks for (and part of the cache key).
+	const ENGINE_LINES = 3;
+
+	// Same idea for the child-move evals of the Players and Masters tabs, with
+	// a longer delay: they are lower priority than the Engine tab and
+	// pointless to start for a position the user is about to leave.
+	const CHILD_EVAL_DEBOUNCE_MS = 600;
 
 	interface Candidate {
 		san: string;
@@ -60,9 +78,6 @@
 		draws: number;
 		black: number;
 		totalGames: number;
-		// Only populated for Players-tab rows (see moveEvalBgClass below).
-		evalCp?: number | null;
-		evalMate?: number | null;
 	}
 
 	interface Props {
@@ -140,6 +155,17 @@
 	let playersMoves = $state<MastersMove[]>([]);
 	let playersLoading = $state(false);
 	let playersError = $state(false);
+	// Evals (white's perspective) behind the coloring of the Players and
+	// Masters tabs: the position on screen (the reference) and the position
+	// reached by each move, keyed by SAN. Both are cleared whenever the
+	// position, the list or the tab changes, so they only ever describe the
+	// list on screen. Filled progressively by the effect below; a move with no
+	// entry, or no reference yet, is simply not colored.
+	// `moverIsWhite` is captured with the reference, from the same FEN, so the
+	// two can never disagree during a position change.
+	let parentEval = $state<{ ev: ChildEval; moverIsWhite: boolean } | null>(null);
+	const childEvals = new SvelteMap<string, ChildEval>();
+	let childEvalPending = $state(0);
 	// Local override: null means "use the prop". Set when the user picks a bracket
 	// in the dropdown; cleared when the prop catches up (after settings PATCH).
 	let ratingOverride = $state<number | null>(null);
@@ -307,6 +333,21 @@
 		};
 	});
 
+	// Shows MultiPV lines (RAW, side to move) in the Engine tab, flipped to
+	// white's perspective. Shared by a fresh search and a cache hit.
+	function applyEngineLines(lines: MultiPvLine[], whiteMultiplier: 1 | -1): void {
+		engineCandidates = lines.map((l) => ({
+			san: l.moveSan ?? l.moveUci,
+			uci: l.moveUci,
+			evalCp: l.evalCp != null ? l.evalCp * whiteMultiplier : null,
+			evalMate: l.evalMate != null ? l.evalMate * whiteMultiplier : null,
+			isBook: false,
+			annotation: null,
+			openingName: null
+		}));
+		engineAvailable = true;
+	}
+
 	// ── Engine — client-side Stockfish (WASM, depth-20 fixed, no server round-trip) ──
 	// Runs entirely in the browser via $lib/client/stockfish — see that
 	// module for the depth/watchdog/perspective rationale. `interactive:
@@ -317,6 +358,30 @@
 	$effect(() => {
 		const fen = currentFen;
 		let cancelled = false;
+
+		// Same position as an earlier, finished search: show it at once, with
+		// no debounce and no engine call. The search of the position just
+		// left must still be stopped, or it would keep running to depth 20
+		// and delay the Players / Masters coloring.
+		const cachedLines = getCachedEngineLines(fen, ENGINE_LINES);
+		if (cachedLines) {
+			let multiplier: 1 | -1 | null = null;
+			try {
+				multiplier = new Chess(fen).turn() === 'w' ? 1 : -1;
+			} catch {
+				// Unusable FEN: take the normal path below, which reports it.
+			}
+			if (multiplier !== null) {
+				cancelInteractiveSearches();
+				engineError = false;
+				engineDepth = ENGINE_TARGET_DEPTH;
+				engineMaxDepth = ENGINE_TARGET_DEPTH;
+				engineCompleted = true;
+				applyEngineLines(cachedLines, multiplier);
+				engineLoading = false;
+				return;
+			}
+		}
 
 		engineLoading = true;
 		engineError = false;
@@ -337,7 +402,7 @@
 
 			evaluatePositionMultiPv(
 				fen,
-				3,
+				ENGINE_LINES,
 				({ depth }) => {
 					if (cancelled) return;
 					engineDepth = depth;
@@ -358,17 +423,11 @@
 						return;
 					}
 
-					engineCandidates = lines.map((l) => ({
-						san: l.moveSan ?? l.moveUci,
-						uci: l.moveUci,
-						evalCp: l.evalCp != null ? l.evalCp * whiteMultiplier : null,
-						evalMate: l.evalMate != null ? l.evalMate * whiteMultiplier : null,
-						isBook: false,
-						annotation: null,
-						openingName: null
-					}));
-					engineAvailable = true;
+					applyEngineLines(lines, whiteMultiplier);
 					engineCompleted = engineDepth >= ENGINE_TARGET_DEPTH;
+					// Only a search that reached the target depth is reusable:
+					// a cut-short one would be shown later as if it were complete.
+					if (engineCompleted) cacheEngineLines(fen, ENGINE_LINES, lines);
 					engineLoading = false;
 				})
 				.catch(() => {
@@ -480,6 +539,54 @@
 		};
 	});
 
+	// Colors the Players and Masters tab rows: evaluates the current position
+	// and the positions reached by its most played moves, on the client (see
+	// $lib/client/playerEvals for the priority and selection rules, identical
+	// for both tabs). Restarts whenever the position, the loaded list or the
+	// tab changes; the cleanup stops the running search.
+	$effect(() => {
+		const fen = currentFen;
+		const tab = activeTab;
+		const moves = tab === 'players' ? playersMoves : tab === 'masters' ? mastersMoves : [];
+		const loading = tab === 'players' ? playersLoading : mastersLoading;
+		const moverIsWhite = fen.split(' ')[1] !== 'b';
+
+		parentEval = null;
+		childEvals.clear();
+		childEvalPending = 0;
+		if ((tab !== 'players' && tab !== 'masters') || loading || moves.length === 0) return;
+
+		const sans = selectMovesToEvaluate(moves);
+		if (sans.length === 0) return;
+
+		let cancelled = false;
+		childEvalPending = sans.length;
+
+		const timer = setTimeout(() => {
+			evaluateChildren(fen, sans, {
+				isCancelled: () => cancelled,
+				onParentEval: (ev) => {
+					if (cancelled) return;
+					parentEval = { ev, moverIsWhite };
+				},
+				onEval: (san, ev) => {
+					if (cancelled) return;
+					childEvals.set(san, ev);
+					childEvalPending = Math.max(0, childEvalPending - 1);
+				}
+			}).finally(() => {
+				// Done, or gave up on some moves: nothing more is coming.
+				if (!cancelled) childEvalPending = 0;
+			});
+		}, CHILD_EVAL_DEBOUNCE_MS);
+
+		return () => {
+			cancelled = true;
+			clearTimeout(timer);
+			cancelChildEvals();
+		};
+	});
+
 	// ── Stars fetch — local celebrity DB, instant response ───────────────────
 	// Fetches move statistics for a specific famous player when the Stars tab
 	// is active. Re-fetches when the selected player changes.
@@ -562,41 +669,45 @@
 		return 'eval-equal';
 	}
 
-	// ── Players tab — background coloring by eval delta vs the best move ─────
-	// Converts a (cp, mate) pair into one comparable number, from the current
-	// player's perspective (higher = better for them), so mate scores and cp
-	// scores can be ranked against each other. Mates are pushed far outside
-	// the cp range so "mate for me" always outranks any cp score and "mate
-	// against me" always underranks any cp score.
-	function playerScore(cp: number | null, mate: number | null): number | null {
+	// ── Players and Masters tabs — background coloring by centipawn loss ─────
+	// Converts a (cp, mate) pair, in white's perspective, into one comparable
+	// number from the point of view of the side that plays the move (higher =
+	// better for them), so mate scores and cp scores can be ranked against
+	// each other. Mates are pushed far outside the cp range so "mate for the
+	// mover" always outranks any cp score and "mate against the mover" always
+	// underranks any cp score.
+	function moverScore(
+		cp: number | null,
+		mate: number | null,
+		moverIsWhite: boolean
+	): number | null {
 		if (mate !== null) {
-			const playerMate = playerColor === 'BLACK' ? -mate : mate;
-			return playerMate > 0 ? 100_000 - playerMate : -100_000 - playerMate;
+			const moverMate = moverIsWhite ? mate : -mate;
+			return moverMate > 0 ? 100_000 - moverMate : -100_000 - moverMate;
 		}
 		if (cp === null) return null;
-		return playerColor === 'BLACK' ? -cp : cp;
+		return moverIsWhite ? cp : -cp;
 	}
 
-	// Best score among the currently loaded Players-tab moves. null if none
-	// of them have an eval yet (still loading, or the engine is unavailable).
-	let playersBestScore = $derived.by(() => {
-		const scores = playersMoves
-			.map((m) => playerScore(m.evalCp ?? null, m.evalMate ?? null))
-			.filter((s): s is number => s !== null);
-		return scores.length > 0 ? Math.max(...scores) : null;
-	});
-
-	// Background tint for a Players-tab move, by how far its eval trails the
-	// best evaluated move: <20cp good, 20-50cp neutral, >50cp bad. Returns ''
-	// for Masters/Stars rows (evalCp is undefined there — not computed) so
-	// this only ever affects the Players tab.
+	// Background tint for a Players- or Masters-tab move, by how much the move
+	// costs the side that plays it compared with the position before the move:
+	// <20cp good, 20-50cp neutral, >50cp bad. The reference is the eval of the
+	// position itself, not the other moves of the list, so a move has the same
+	// color in both tabs. A negative loss can only come from search noise
+	// between the position and its moves, and counts as no loss. Returns ''
+	// for rows outside those two tabs, before the reference is known, and for
+	// moves not (yet) evaluated.
 	function moveEvalBgClass(m: MastersMove): string {
-		if (m.evalCp === undefined || playersBestScore === null) return '';
-		const score = playerScore(m.evalCp ?? null, m.evalMate ?? null);
-		if (score === null) return '';
-		const delta = playersBestScore - score;
-		if (delta < 20) return 'move-eval-good';
-		if (delta < 50) return 'move-eval-neutral';
+		if ((activeTab !== 'players' && activeTab !== 'masters') || parentEval === null) return '';
+		const ev = childEvals.get(m.san);
+		if (!ev) return '';
+		const { moverIsWhite } = parentEval;
+		const before = moverScore(parentEval.ev.evalCp, parentEval.ev.evalMate, moverIsWhite);
+		const after = moverScore(ev.evalCp, ev.evalMate, moverIsWhite);
+		if (before === null || after === null) return '';
+		const loss = Math.max(0, before - after);
+		if (loss < 20) return 'move-eval-good';
+		if (loss < 50) return 'move-eval-neutral';
 		return 'move-eval-bad';
 	}
 
@@ -754,6 +865,9 @@
 					{@render wdlRow(m, idx)}
 				{/each}
 			</div>
+			{#if childEvalPending > 0}
+				<p class="eval-pending">Evaluating moves…</p>
+			{/if}
 		{/if}
 
 		<!-- ── Stars tab content ─────────────────────────────────────────────── -->
@@ -822,6 +936,9 @@
 					{@render wdlRow(m, idx)}
 				{/each}
 			</div>
+			{#if childEvalPending > 0}
+				<p class="eval-pending">Evaluating moves…</p>
+			{/if}
 		{/if}
 
 		<!-- ── Engine tab content ────────────────────────────────────────────── -->
@@ -928,6 +1045,12 @@
 		font-style: italic;
 	}
 
+	.eval-pending {
+		margin: 0.25rem 0 0;
+		font-size: 0.75rem;
+		opacity: 0.6;
+	}
+
 	.empty-hint {
 		font-size: 12px;
 		color: var(--color-text-muted);
@@ -978,7 +1101,7 @@
 		cursor: default;
 	}
 
-	/* ── Players tab — background tint by eval delta vs best move ──────────── */
+	/* ── Players and Masters tabs — background tint by centipawn loss ───────── */
 	/* Subtle tint + left border so the WDL bar underneath stays legible. */
 
 	.move-eval-good {
