@@ -21,9 +21,6 @@ import { spawn } from 'child_process';
 // or point to wherever your local binary lives.
 const STOCKFISH_BIN = process.env.STOCKFISH_BIN ?? '/usr/games/stockfish';
 
-// Default timeout when no explicit value is provided (10 seconds).
-const DEFAULT_TIMEOUT_MS = 10_000;
-
 export interface StockfishMove {
 	// The move in UCI notation: from-square + to-square + optional promotion piece.
 	// e.g. "e2e4", "g1f3", "e7e8q" (pawn promotes to queen)
@@ -41,8 +38,8 @@ export interface StockfishMove {
 }
 
 // Result of getTopMoves(). `completed` is true only when Stockfish sent
-// "bestmove" for the requested depth before the timeout fired — i.e. `moves`
-// genuinely reflects `depth`. If the timeout cut the search short, `moves`
+// "bestmove" for the requested depth before the watchdog fired — i.e. `moves`
+// genuinely reflects `depth`. If the watchdog cut the search short, `moves`
 // still holds whatever partial results were accumulated (deliberately, so
 // callers who don't care about precision can still use them), but
 // `completed` is false so callers who DO care (e.g. anything that persists
@@ -57,16 +54,15 @@ export interface TopMovesResult {
 // fen        — position to analyse, in FEN notation
 // depth      — search depth in half-moves (higher = stronger but slower)
 // numMoves   — how many candidates to return (controls the MultiPV setting)
-// timeoutMs  — fixed hard cap before returning partial results. Ignored when
-//              watchdogMs is provided (see below).
-// watchdogMs — when set, replaces the fixed timeoutMs cap with a resettable
-//              timer: it is rearmed every time Stockfish reports a new,
-//              higher search depth, and only fires if no depth progress
-//              arrives for watchdogMs. Use this for one-shot background
-//              evaluations that must reach a target depth reliably rather
-//              than complete within a fixed wall-clock budget (e.g. a
-//              single post-game evaluation). Leave unset for interactive
-//              callers that need a bounded response time.
+// watchdogMs — stall timeout, required: there is deliberately no fixed
+//              wall-clock cap. The timer is armed at spawn and rearmed every
+//              time Stockfish reports a new, higher search depth, so it only
+//              fires if no depth progress arrives for watchdogMs (this also
+//              covers an engine that never answers "isready"). On expiry the
+//              process is killed and the partial results are returned with
+//              completed = false. Made for one-shot background evaluations
+//              that must reach a target depth reliably (e.g. the single
+//              post-game evaluation of /api/train/evaluate).
 //
 // Returns { moves: [], completed: false } without throwing if the engine is
 // unavailable.
@@ -74,8 +70,7 @@ export async function getTopMoves(
 	fen: string,
 	depth: number,
 	numMoves: number,
-	timeoutMs: number = DEFAULT_TIMEOUT_MS,
-	watchdogMs?: number
+	watchdogMs: number
 ): Promise<TopMovesResult> {
 	return new Promise((resolve) => {
 		// bestResults maps MultiPV index (1-based) → latest result for that PV.
@@ -83,7 +78,7 @@ export async function getTopMoves(
 		const bestResults = new Map<number, StockfishMove>();
 		let buffer = '';
 		let resolved = false;
-		// Only tracked/used when watchdogMs is set — see rearmWatchdog below.
+		// Highest search depth reported so far — see rearmWatchdog below.
 		let lastDepthSeen = 0;
 
 		// Guard: ensure we only resolve once (timeout, bestmove, or process exit
@@ -122,18 +117,14 @@ export async function getTopMoves(
 		const stdin = proc.stdin!;
 		const stdout = proc.stdout!;
 
-		// Safety net: if analysis takes too long, return partial results rather
-		// than hanging the request indefinitely. Not a real completion.
+		// Safety net: if the engine stalls, return partial results rather than
+		// hanging the request indefinitely. Not a real completion.
 		//
-		// Without watchdogMs, this is a plain one-shot timer (existing behaviour):
-		// it fires once, at timeoutMs, regardless of progress.
-		//
-		// With watchdogMs, rearmWatchdog() below resets it on every depth
-		// increase, so it only fires after watchdogMs of no progress at all.
-		let timer = setTimeout(() => finish(false), watchdogMs ?? timeoutMs);
+		// Armed at spawn, then reset by rearmWatchdog() on every depth increase,
+		// so it only fires after watchdogMs of no progress at all.
+		let timer = setTimeout(() => finish(false), watchdogMs);
 
 		const rearmWatchdog = () => {
-			if (watchdogMs == null) return;
 			clearTimeout(timer);
 			timer = setTimeout(() => finish(false), watchdogMs);
 		};
