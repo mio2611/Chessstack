@@ -86,7 +86,6 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		fen,
 		TRAIN_EVAL_DEPTH,
 		1,
-		undefined,
 		TRAIN_EVAL_WATCHDOG_MS
 	);
 
