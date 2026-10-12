@@ -9,6 +9,8 @@
 	import TutorialOverlay from '$lib/components/tutorial/TutorialOverlay.svelte';
 	import { manageRepertoiresOpen } from '$lib/stores/manageRepertoires';
 	import { tutorialStep } from '$lib/stores/tutorial';
+	import { afterNavigate } from '$app/navigation';
+	import { navCounts, refreshNavCounts, setNavRepertoire } from '$lib/stores/navCounts';
 
 	// `data` comes from +layout.server.ts and includes `user`, `repertoires`,
 	// and `activeRepertoireId`.
@@ -24,20 +26,72 @@
 	let mobileMenuOpen = $state(false);
 
 	// Navigation link definitions — Admin link only shown for admin users.
-	const navLinks = $derived([
+	// `badge` is the number of due items for the modules that have one.
+	type NavLink = { href: string; label: string; badge?: number };
+	const navLinks: NavLink[] = $derived([
 		{ href: `${base}/`, label: 'Dashboard' },
 		{ href: `${base}/build`, label: 'Build' },
-		{ href: `${base}/drill`, label: 'Drill' },
+		{ href: `${base}/drill`, label: 'Drill', badge: $navCounts.drill },
 		{ href: `${base}/train`, label: 'Train' },
 		{ href: `${base}/puzzles`, label: 'Puzzles' },
-		{ href: `${base}/endgame`, label: 'Endgames' },
-		{ href: `${base}/anti-gaffe`, label: 'Blunders' },
+		{ href: `${base}/endgame`, label: 'Endgames', badge: $navCounts.endgame },
+		{ href: `${base}/anti-gaffe`, label: 'Blunders', badge: $navCounts.antiGaffe },
 		{ href: `${base}/review`, label: 'Review' },
 		{ href: `${base}/prep`, label: 'Prep' },
 		{ href: `${base}/stats`, label: 'Stats' },
 		{ href: `${base}/settings`, label: 'Settings' },
 		...(data.user?.role === 'admin' ? [{ href: `${base}/admin`, label: 'Admin' }] : [])
 	]);
+
+	// The drawer is closed by default on mobile, so the badges inside it are
+	// invisible: a dot on the hamburger signals that something is due.
+	const anythingDue = $derived($navCounts.drill + $navCounts.endgame + $navCounts.antiGaffe > 0);
+
+	function badgeText(n: number): string {
+		return n > 99 ? '99+' : String(n);
+	}
+
+	// ── Due-count badges ────────────────────────────────────────────────
+	// Refresh on mount and whenever the active repertoire changes (drill is
+	// scoped to it), after each client-side navigation, when the tab becomes
+	// visible again, and every minute (cards become due as time passes).
+	$effect(() => {
+		if (!data.user) return;
+		setNavRepertoire(data.activeRepertoireId);
+		void refreshNavCounts();
+	});
+
+	afterNavigate((nav) => {
+		// The first load is already covered by the effect above.
+		if (data.user && nav.type !== 'enter') void refreshNavCounts();
+	});
+
+	$effect(() => {
+		if (!data.user) return;
+		const refreshIfVisible = () => {
+			if (document.visibilityState === 'visible') void refreshNavCounts();
+		};
+		document.addEventListener('visibilitychange', refreshIfVisible);
+		const timer = setInterval(refreshIfVisible, 60_000);
+		return () => {
+			document.removeEventListener('visibilitychange', refreshIfVisible);
+			clearInterval(timer);
+		};
+	});
+
+	// The server has no user timezone. Hand the browser's to it through a
+	// cookie so the dashboard streak counts calendar days in local time.
+	$effect(() => {
+		if (!data.user) return;
+		try {
+			const tz = encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone);
+			if (!document.cookie.split('; ').includes(`tz=${tz}`)) {
+				document.cookie = `tz=${tz}; path=/; max-age=31536000; SameSite=Lax`;
+			}
+		} catch {
+			// Unsupported Intl: the server falls back to UTC.
+		}
+	});
 
 	// Determine if a nav link is the active page.
 	// Dashboard matches exact "/", others match by prefix.
@@ -70,7 +124,10 @@
 					href={link.href}
 					class="nav-link"
 					class:active={isActive(link.href)}
-					aria-current={isActive(link.href) ? 'page' : undefined}>{link.label}</a
+					aria-current={isActive(link.href) ? 'page' : undefined}
+					>{link.label}{#if link.badge}<span class="nav-badge" aria-label="{link.badge} due"
+							>{badgeText(link.badge)}</span
+						>{/if}</a
 				>
 			{/each}
 		</nav>
@@ -97,6 +154,8 @@
 			<span class="hamburger-line" class:open={mobileMenuOpen}></span>
 			<span class="hamburger-line" class:open={mobileMenuOpen}></span>
 			<span class="hamburger-line" class:open={mobileMenuOpen}></span>
+			{#if anythingDue && !mobileMenuOpen}<span class="hamburger-dot" aria-hidden="true"
+				></span>{/if}
 		</button>
 	</header>
 
@@ -109,7 +168,10 @@
 					class="mobile-link"
 					class:active={isActive(link.href)}
 					aria-current={isActive(link.href) ? 'page' : undefined}
-					onclick={() => (mobileMenuOpen = false)}>{link.label}</a
+					onclick={() => (mobileMenuOpen = false)}
+					>{link.label}{#if link.badge}<span class="nav-badge" aria-label="{link.badge} due"
+							>{badgeText(link.badge)}</span
+						>{/if}</a
 				>
 			{/each}
 		</nav>
@@ -290,6 +352,23 @@
 		}
 	}
 
+	/* Due-count badge next to a nav label */
+	.nav-badge {
+		display: inline-block;
+		min-width: 16px;
+		margin-left: var(--space-1);
+		padding: 0 5px;
+		border-radius: 8px;
+		background: var(--color-accent);
+		color: #fff;
+		font-size: 10px;
+		font-weight: 700;
+		line-height: 16px;
+		text-align: center;
+		letter-spacing: 0;
+		vertical-align: 1px;
+	}
+
 	/* ── Right side: user area ────────────────────────────────────────── */
 
 	.signout-form {
@@ -328,6 +407,7 @@
 	/* ── Hamburger (mobile only) ──────────────────────────────────────── */
 
 	.hamburger {
+		position: relative;
 		display: none;
 		flex-direction: column;
 		justify-content: center;
@@ -339,6 +419,16 @@
 		border: none;
 		cursor: pointer;
 		margin-left: auto;
+	}
+
+	.hamburger-dot {
+		position: absolute;
+		top: 4px;
+		right: 4px;
+		width: 8px;
+		height: 8px;
+		border-radius: 50%;
+		background: var(--color-accent);
 	}
 
 	.hamburger-line {

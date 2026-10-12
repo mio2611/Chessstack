@@ -17,7 +17,8 @@ import { userMove, userRepertoireMove } from '$lib/db/schema';
 import { eq, and, lte } from 'drizzle-orm';
 import { fenKey } from '$lib/gaps';
 import { sanitizeFen } from '$lib/fen';
-import { getEffectiveStartFens, buildInScopeFens } from '$lib/repertoire';
+import { buildInScopeFens } from '$lib/repertoire';
+import { scopeCards } from '$lib/server/due-counts';
 import { intervalLabels } from '$lib/fsrs';
 import { loadFsrsConfig } from '$lib/server/fsrs-config';
 
@@ -75,13 +76,9 @@ export const load: PageServerLoad = async ({ locals, parent, url }) => {
 		const subtree = buildInScopeFens([fromFen], moves);
 		dueCards = dueCards.filter((c) => subtree.has(fenKey(c.fromFen)));
 	} else {
-		const startFens = getEffectiveStartFens(
-			activeRep.startFen ?? null,
-			moves,
-			activeRep.color as 'WHITE' | 'BLACK'
-		);
-		const inScope = buildInScopeFens(startFens, moves);
-		dueCards = dueCards.filter((c) => inScope.has(fenKey(c.fromFen)));
+		// Shared with the top-menu badges and the dashboard To do widget, so the
+		// counts they show always match what this page offers.
+		dueCards = scopeCards(activeRep, moves, dueCards);
 	}
 
 	const fsrsConfig = await loadFsrsConfig(userId);

@@ -84,43 +84,12 @@
 			: data.gaps.filter((g) => getGapSection(g.depth) === selectedGapSection)
 	);
 
-	// ── Health prompt (actionable hint for the weakest factor) ─────────
-	let healthPrompt = $derived.by(() => {
-		if (data.totalCards === 0 || data.healthScore >= 80) return null;
-
-		const gapCount = data.gaps.length;
-		const coverage = Math.max(0, 100 - gapCount * 5);
-		const mastery = Math.round((data.masteredCount / data.totalCards) * 100);
-		const freshness = Math.round((1 - data.dueCount / data.totalCards) * 100);
-		const trouble = data.troubleCount ?? 0;
-		const stability = Math.round((1 - trouble / data.totalCards) * 100);
-
-		const learningCount = data.cardStates.new_ + data.cardStates.learning;
-		const factors = [
-			{
-				score: freshness,
-				text: `Drill ${data.dueCount} due card${data.dueCount === 1 ? '' : 's'} to improve`,
-				href: `${base}/drill`
-			},
-			{
-				score: coverage,
-				text: `Fix ${gapCount} gap${gapCount === 1 ? '' : 's'} to improve`,
-				href: `${base}/build`
-			},
-			{
-				score: mastery,
-				text: `Learn ${learningCount} new card${learningCount === 1 ? '' : 's'} to improve`,
-				href: `${base}/drill`
-			},
-			{
-				score: stability,
-				text: `Review ${trouble} trouble card${trouble === 1 ? '' : 's'} to improve`,
-				href: `${base}/drill`
-			}
-		];
-
-		return factors.reduce((worst, f) => (f.score < worst.score ? f : worst));
-	});
+	// ── To do (same counts as the top-menu badges) ──────────────────────
+	const todoItems = $derived([
+		{ href: `${base}/drill`, label: 'Drill', count: data.todo.drill },
+		{ href: `${base}/endgame`, label: 'Endgames', count: data.todo.endgame },
+		{ href: `${base}/anti-gaffe`, label: 'Blunders', count: data.todo.antiGaffe }
+	]);
 
 	// ── Puzzle Goal state ───────────────────────────────────────────────
 	let editingGoal = $state(false);
@@ -218,30 +187,18 @@
 		<h1>Dashboard</h1>
 
 		<div class="widget-grid">
-			<!-- Due Now -->
-			<a href="{base}/drill" class="widget widget-link">
-				<div class="widget-label">Due Now</div>
-				<div class="widget-value" class:due-positive={data.dueCount > 0}>
-					{data.dueCount}
+			<!-- To do: due items per spaced-repetition module -->
+			<div class="widget widget-wide">
+				<div class="widget-label">To do</div>
+				<div class="todo-row">
+					{#each todoItems as item (item.href)}
+						<a href={item.href} class="todo-item">
+							<span class="todo-count" class:due-positive={item.count > 0}>{item.count}</span>
+							<span class="todo-name">{item.label}</span>
+							<span class="widget-hint">{item.count > 0 ? 'due' : 'all caught up'}</span>
+						</a>
+					{/each}
 				</div>
-				{#if data.dueCount > 0}
-					<div class="widget-hint">Tap to drill</div>
-				{:else}
-					<div class="widget-hint">All caught up</div>
-				{/if}
-			</a>
-
-			<!-- Mastered -->
-			<div class="widget">
-				<div class="widget-label">Mastered</div>
-				<div class="widget-value mastered-value">
-					{data.masteredCount}<span class="widget-denom">/{data.totalCards}</span>
-				</div>
-				{#if data.totalCards > 0}
-					<div class="widget-hint">
-						{Math.round((data.masteredCount / data.totalCards) * 100)}% of cards
-					</div>
-				{/if}
 			</div>
 
 			<!-- Streak -->
@@ -251,7 +208,7 @@
 					{data.streak}<span class="widget-unit">d</span>
 				</div>
 				<div class="widget-hint">
-					{data.streak === 0 ? 'Drill today to start' : 'Consecutive days'}
+					{data.streak === 0 ? 'Study today to start' : 'Consecutive days'}
 				</div>
 			</div>
 
@@ -259,7 +216,9 @@
 			<div class="widget">
 				<div class="widget-label">Next Review</div>
 				<div class="widget-value next-value">
-					{#if data.nextReviewAt}
+					{#if data.todo.drill > 0}
+						Now
+					{:else if data.nextReviewAt}
 						{relativeTime(data.nextReviewAt)}
 					{:else if data.totalCards === 0}
 						&mdash;
@@ -268,38 +227,14 @@
 					{/if}
 				</div>
 				<div class="widget-hint">
-					{#if data.nextReviewAt}
-						Soonest due card
+					{#if data.todo.drill > 0}
+						{data.todo.drill} drill card{data.todo.drill === 1 ? '' : 's'} due
+					{:else if data.nextReviewAt}
+						Soonest due drill card
 					{:else if data.totalCards === 0}
 						No cards yet
 					{:else}
 						Cards are waiting
-					{/if}
-				</div>
-			</div>
-
-			<!-- Health Score -->
-			<div class="widget">
-				<div class="widget-label">Health</div>
-				<div
-					class="widget-value"
-					class:health-green={data.healthScore >= 80}
-					class:health-yellow={data.healthScore >= 50 && data.healthScore < 80}
-					class:health-red={data.healthScore < 50}
-				>
-					{#if data.totalCards === 0}
-						&mdash;
-					{:else}
-						{data.healthScore}
-					{/if}
-				</div>
-				<div class="widget-hint">
-					{#if data.totalCards === 0}
-						No cards yet
-					{:else if healthPrompt}
-						<a href={healthPrompt.href} class="health-action">{healthPrompt.text}</a>
-					{:else}
-						Healthy
 					{/if}
 				</div>
 			</div>
@@ -642,17 +577,6 @@
 		grid-column: 1 / -1;
 	}
 
-	.widget-link {
-		text-decoration: none;
-		color: inherit;
-		cursor: pointer;
-	}
-
-	.widget-link:hover {
-		border-color: var(--color-border-strong);
-		box-shadow: var(--glow-accent);
-	}
-
 	.widget-label {
 		display: flex;
 		align-items: center;
@@ -694,16 +618,45 @@
 		font-size: 13px;
 	}
 
-	/* ── Due Now accent ───────────────────────────────────────────────── */
+	/* ── To do ────────────────────────────────────────────────────────── */
 
 	.due-positive {
 		color: var(--color-accent);
 	}
 
-	/* ── Mastered accent ──────────────────────────────────────────────── */
+	.todo-row {
+		display: grid;
+		grid-template-columns: repeat(3, 1fr);
+		gap: var(--space-3);
+		margin-top: var(--space-2);
+	}
 
-	.mastered-value {
-		color: var(--color-success);
+	.todo-item {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		padding: var(--space-3);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-md);
+		text-decoration: none;
+		color: inherit;
+		transition: border-color var(--dur-base) var(--ease-snap);
+	}
+
+	.todo-item:hover {
+		border-color: var(--color-border-strong);
+	}
+
+	.todo-count {
+		font-size: 1.8rem;
+		font-weight: 700;
+		line-height: 1.2;
+		color: var(--color-text-primary);
+	}
+
+	.todo-name {
+		font-size: 13px;
+		color: var(--color-text-secondary);
 	}
 
 	/* ── Streak accent ────────────────────────────────────────────────── */
@@ -716,29 +669,6 @@
 
 	.next-value {
 		color: var(--color-text-secondary);
-	}
-
-	/* ── Health Score accent ──────────────────────────────────────────── */
-
-	.health-green {
-		color: var(--color-success);
-	}
-
-	.health-yellow {
-		color: var(--color-accent-dim);
-	}
-
-	.health-red {
-		color: var(--color-danger);
-	}
-
-	.health-action {
-		color: inherit;
-		text-decoration: none;
-	}
-
-	.health-action:hover {
-		text-decoration: underline;
 	}
 
 	/* ── Card State Breakdown ─────────────────────────────────────────── */
