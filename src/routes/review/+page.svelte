@@ -274,6 +274,11 @@
 			existingSan: string; // the move already in the repertoire at this FEN
 			userPlayedCorrect: boolean; // did the user play the repertoire move in the game?
 		} | null;
+		// True when the opponent's move was already in the repertoire (nothing to add).
+		opponentInTree: boolean;
+		// Game plies already covered by the repertoire that were passed over to reach
+		// this leg (transposition). 0 when none.
+		skippedPlies: number;
 	}
 
 	// Keyed by issue.ply — only one active chain leg per issue at a time.
@@ -283,6 +288,8 @@
 	// Tracks user-turn moves added during this review session so buildChainLeg()
 	// can detect when the chain walks into a position already in the repertoire.
 	let addedUserMoves = new SvelteMap<string, string>(); // fenKey → san
+	// Opponent-turn moves added during this session, keyed `fenKey|san`.
+	let addedOpponentMoves = new SvelteSet<string>();
 
 	// Combines server-loaded moves with session additions for transposition checks.
 	function getUserMoveAt(fen: string): string | undefined {
@@ -299,6 +306,22 @@
 			if (isUserTurn && fenKey(m.fromFen) === key) return m.san;
 		}
 		return undefined;
+	}
+
+	// True when the repertoire already holds this opponent move at this position
+	// (server-loaded moves or added during this session).
+	function hasOpponentMoveAt(fen: string, san: string): boolean {
+		const key = fenKey(fen);
+		if (addedOpponentMoves.has(`${key}|${san}`)) return true;
+		const repId = overrideRepertoireId ?? data.repertoire.id;
+		const color = analysedPlayerColor;
+		for (const m of data.moves) {
+			if (m.repertoireId !== repId || m.san !== san) continue;
+			const turn = m.fromFen.split(' ')[1];
+			const isUserTurn = (color === 'WHITE' && turn === 'w') || (color === 'BLACK' && turn === 'b');
+			if (!isUserTurn && fenKey(m.fromFen) === key) return true;
+		}
+		return false;
 	}
 
 	// Evals for DEVIATION issues: evalCp from White's perspective after each move.
@@ -491,6 +514,7 @@
 				opponentMoveAdded.clear();
 				chainExtensions.clear();
 				addedUserMoves.clear();
+				addedOpponentMoves.clear();
 				actionLoading.clear();
 				actionError.clear();
 				deviationEvals.clear();
@@ -1079,6 +1103,7 @@
 				fromFen: issue.fromFen,
 				san: issue.playedSan
 			});
+			addedOpponentMoves.add(`${fenKey(issue.fromFen)}|${issue.playedSan}`);
 			opponentMoveAdded.add(issue.ply);
 		} catch (e) {
 			actionError.set(
@@ -1109,6 +1134,7 @@
 
 			// Switch the rest of this review to use the new repertoire.
 			overrideRepertoireId = newRep.id;
+			addedOpponentMoves.clear(); // session additions belonged to the previous repertoire
 
 			// Add the opponent's move to the new repertoire.
 			await callApi('/api/review/add-move', {
@@ -1116,6 +1142,7 @@
 				fromFen: issue.fromFen,
 				san: issue.playedSan
 			});
+			addedOpponentMoves.add(`${fenKey(issue.fromFen)}|${issue.playedSan}`);
 			opponentMoveAdded.add(issue.ply);
 			newRepIssuePly = null;
 			newRepName = '';
@@ -1160,8 +1187,46 @@
 			userFen,
 			userSan,
 			plyInGame: opponentPlyInGame,
-			transposition
+			transposition,
+			opponentInTree: false,
+			skippedPlies: 0
 		};
+	}
+
+	// Like buildChainLeg(), but first walks through the part of the game that is
+	// already in the repertoire (transposition): while the opponent's move is in the
+	// tree and the user played the book move, move on to the next leg. Stops at the
+	// first leg that needs a decision: opponent move missing (game leaves the tree),
+	// user response missing (new move) or user response different from the book.
+	// `alreadyCovered` = plies known to be in the repertoire before this call.
+	// Returns null when the game ends with nothing left to add.
+	function nextChainLeg(opponentPly: number, alreadyCovered = 0): ChainLeg | null {
+		let ply = opponentPly;
+		let covered = alreadyCovered;
+		while (true) {
+			const leg = buildChainLeg(ply);
+			if (!leg) return null;
+			if (!hasOpponentMoveAt(leg.opponentFen, leg.opponentSan)) {
+				return { ...leg, skippedPlies: covered };
+			}
+			// Opponent move already in the tree.
+			if (!leg.userSan) {
+				// Game ends right after the opponent's move: done if the book already answers.
+				if (leg.userFen && getUserMoveAt(leg.userFen)) return null;
+			} else if (leg.transposition?.userPlayedCorrect) {
+				covered += 2; // opponent move + user's book move
+				ply += 2;
+				continue;
+			}
+			return { ...leg, opponentAdded: true, opponentInTree: true, skippedPlies: covered };
+		}
+	}
+
+	// Show a chain leg: phase A displays the position before the opponent's move,
+	// later phases the position after it.
+	function setChainLeg(issuePly: number, leg: ChainLeg): void {
+		chainExtensions.set(issuePly, leg);
+		currentPlyIdx = leg.opponentAdded ? leg.plyInGame : leg.plyInGame - 1;
 	}
 
 	// ── Chain extension handlers ─────────────────────────────────────────────────
@@ -1182,6 +1247,19 @@
 				fromFen: leg.opponentFen,
 				san: leg.opponentSan
 			});
+			addedOpponentMoves.add(`${fenKey(leg.opponentFen)}|${leg.opponentSan}`);
+			if (leg.transposition?.userPlayedCorrect) {
+				// Transposition and the user played the book move: keep walking the game
+				// instead of stopping here.
+				const next = nextChainLeg(leg.plyInGame + 2, 1);
+				if (next) {
+					setChainLeg(issuePly, next);
+				} else {
+					chainExtensions.delete(issuePly);
+					resolveIssue(issuePly);
+				}
+				return;
+			}
 			chainExtensions.set(issuePly, { ...leg, opponentAdded: true });
 			currentPlyIdx = leg.plyInGame; // advance board to position after opponent's move
 		} catch (e) {
@@ -1220,11 +1298,9 @@
 			// If the picked move matches the game continuation, try to chain-extend.
 			if (san === gameSan) {
 				const nextOpponentPly = issue.type === 'OPPONENT_SURPRISE' ? issue.ply + 2 : issue.ply + 1;
-				const leg = buildChainLeg(nextOpponentPly);
+				const leg = nextChainLeg(nextOpponentPly);
 				if (leg) {
-					const advancePly = issue.type === 'OPPONENT_SURPRISE' ? issue.ply + 1 : issue.ply;
-					currentPlyIdx = advancePly;
-					chainExtensions.set(issue.ply, leg);
+					setChainLeg(issue.ply, leg);
 					return;
 				}
 			}
@@ -1255,10 +1331,9 @@
 			addedUserMoves.set(fenKey(leg.userFen), san);
 			if (san === leg.userSan) {
 				// Same move as the game — advance the chain.
-				const nextLeg = buildChainLeg(leg.plyInGame + 2);
+				const nextLeg = nextChainLeg(leg.plyInGame + 2);
 				if (nextLeg) {
-					currentPlyIdx = leg.plyInGame + 1;
-					chainExtensions.set(issuePly, nextLeg);
+					setChainLeg(issuePly, nextLeg);
 					return;
 				}
 			}
@@ -2084,6 +2159,15 @@
 										<!-- ── Chain extension phases ─────────────────────────────────── -->
 										<!-- Phase A: ask whether to add the next opponent move.         -->
 										<!-- Phase B: opponent added — pick a response.                  -->
+										{#if chainLeg.skippedPlies > 0}
+											<div class="issue-details">
+												<span
+													>Transposition: {chainLeg.skippedPlies}
+													{chainLeg.skippedPlies === 1 ? 'move' : 'moves'} already in your repertoire,
+													continuing from move {Math.ceil(chainLeg.plyInGame / 2)}.</span
+												>
+											</div>
+										{/if}
 										{#if !chainLeg.opponentAdded}
 											<div class="issue-details">
 												<span
@@ -2135,14 +2219,6 @@
 														>
 															Done
 														</button>
-														<button
-															class="act-btn act-btn--ghost"
-															onclick={() => handleTranspositionReplace(issue.ply)}
-															disabled={isLoading}
-															title="Replace the existing repertoire path to this position with the path from this game"
-														>
-															Replace path in tree
-														</button>
 													{:else}
 														<button
 															class="act-btn act-btn--warn"
@@ -2172,7 +2248,9 @@
 												<!-- Normal chain phase B — pick a response -->
 												<div class="issue-details">
 													<span
-														><strong>{chainLeg.opponentSan}</strong> added. Pick your response:</span
+														><strong>{chainLeg.opponentSan}</strong>
+														{chainLeg.opponentInTree ? 'is already in your repertoire.' : 'added.'} Pick
+														your response:</span
 													>
 												</div>
 												<div class="issue-picker-wrap">
