@@ -5,6 +5,7 @@
 //   - To do: due counts for Drill, Endgames and Blunders (same source as the
 //     top-menu badges, see $lib/server/due-counts)
 //   - Streak (consecutive local days with any study activity, all modules)
+//   - Puzzle goal (solved puzzles in the current local day/week/month)
 //   - Next Review (soonest due drill card after now)
 //   - Card State Breakdown (New/Learning/Review/Relearning)
 //   - Accuracy Trend (last 14 completed drill sessions of the active repertoire)
@@ -17,15 +18,17 @@ import {
 	userRepertoireMove,
 	drillSession,
 	puzzleAttempt,
+	reviewLog,
 	endgameReviewLog,
 	antiGaffeReviewLog
 } from '$lib/db/schema';
-import { eq, and, gt, gte, desc, count } from 'drizzle-orm';
+import { eq, and, gt, desc } from 'drizzle-orm';
 import { loadGapData } from '$lib/gaps';
 import type { Gap } from '$lib/gaps';
 import { gapRatingWindow } from '$lib/ratings';
 import { scopeCards, isDue, countDueEndgame, countDueAntiGaffe } from '$lib/server/due-counts';
 import type { DueCounts } from '$lib/server/due-counts';
+import { resolveTimeZone, makeDayFormatter, computeStreak, periodStartDay } from '$lib/local-days';
 
 /** Shape of a trouble-spot card returned to the page. */
 export interface TroubleSpot {
@@ -39,37 +42,6 @@ export interface SessionSummary {
 	cardsReviewed: number;
 	cardsCorrect: number;
 	completedAt: number; // unix timestamp (seconds)
-}
-
-/** Browser timezone from the `tz` cookie (set by +layout.svelte), UTC if absent or invalid. */
-function resolveTimeZone(raw: string | undefined): string {
-	if (raw) {
-		try {
-			new Intl.DateTimeFormat('en-CA', { timeZone: raw });
-			return raw;
-		} catch {
-			// Unknown timezone name: fall through to UTC.
-		}
-	}
-	return 'UTC';
-}
-
-/** YYYY-MM-DD string for `date` as seen in `timeZone` (en-CA formats this way). */
-function makeDayFormatter(timeZone: string): (date: Date) => string {
-	const fmt = new Intl.DateTimeFormat('en-CA', {
-		timeZone,
-		year: 'numeric',
-		month: '2-digit',
-		day: '2-digit'
-	});
-	return (date) => fmt.format(date);
-}
-
-/** The calendar day before a YYYY-MM-DD string (pure string/UTC arithmetic). */
-function previousDay(day: string): string {
-	const d = new Date(`${day}T00:00:00Z`);
-	d.setUTCDate(d.getUTCDate() - 1);
-	return d.toISOString().slice(0, 10);
 }
 
 export const load: PageServerLoad = async ({ parent, locals, cookies }) => {
@@ -90,22 +62,79 @@ export const load: PageServerLoad = async ({ parent, locals, cookies }) => {
 		puzzleGoal: null as { count: number; frequency: string; solved: number } | null
 	};
 
-	if (!activeRepertoireId || repertoires.length === 0 || !locals.user) {
-		return emptyStats;
-	}
-
-	const activeRep = repertoires.find((r) => r.id === activeRepertoireId);
-	if (!activeRep) {
+	if (!locals.user) {
 		return emptyStats;
 	}
 
 	const userId = locals.user.id;
+	const now = new Date();
+	const timeZone = resolveTimeZone(cookies.get('tz'));
+	const dayOf = makeDayFormatter(timeZone);
+
+	// ── Data that does not depend on a repertoire ───────────────────────
+	// Endgames, Blunders and the study streak are independent of the active
+	// repertoire, so they are computed before any repertoire check: the To do
+	// widget must agree with the top-menu badges even with no active repertoire.
+	// Activity = any FSRS grade on a drill card (review_log, one row per grade,
+	// so an abandoned drill session still counts), an endgame or anti-gaffe
+	// review, or a puzzle attempt.
+	const [endgameDue, antiGaffeDue, drillReviews, endgameReviews, gaffeReviews, puzzleRows] =
+		await Promise.all([
+			countDueEndgame(userId),
+			countDueAntiGaffe(userId),
+			db.select({ at: reviewLog.reviewedAt }).from(reviewLog).where(eq(reviewLog.userId, userId)),
+			db
+				.select({ at: endgameReviewLog.reviewedAt })
+				.from(endgameReviewLog)
+				.where(eq(endgameReviewLog.userId, userId)),
+			db
+				.select({ at: antiGaffeReviewLog.reviewedAt })
+				.from(antiGaffeReviewLog)
+				.where(eq(antiGaffeReviewLog.userId, userId)),
+			db
+				.select({ at: puzzleAttempt.attemptedAt, solved: puzzleAttempt.solved })
+				.from(puzzleAttempt)
+				.where(eq(puzzleAttempt.userId, userId))
+		]);
+
+	// ── Streak (consecutive local days with any study activity) ─────────
+	// Days are calendar days in the browser's timezone (cookie), not UTC.
+	const activityDates: Date[] = [];
+	for (const rows of [drillReviews, endgameReviews, gaffeReviews, puzzleRows]) {
+		for (const r of rows) {
+			if (r.at) activityDates.push(r.at);
+		}
+	}
+	const streak = computeStreak(activityDates, now, timeZone);
+
+	// ── Puzzle Goal (solved count within current local period) ──────────
+	// The period (day, Monday-based week, month) is bounded by local calendar
+	// days, like the streak, and compared as YYYY-MM-DD strings.
+	let puzzleGoal: { count: number; frequency: string; solved: number } | null = null;
+	if (settings?.puzzleGoalCount && settings?.puzzleGoalFrequency) {
+		const startDay = periodStartDay(dayOf(now), settings.puzzleGoalFrequency);
+		puzzleGoal = {
+			count: settings.puzzleGoalCount,
+			frequency: settings.puzzleGoalFrequency,
+			solved: puzzleRows.filter((r) => r.solved && r.at && dayOf(r.at) >= startDay).length
+		};
+	}
+
+	const activeRep = repertoires.find((r) => r.id === activeRepertoireId);
+	if (!activeRep) {
+		return {
+			...emptyStats,
+			todo: { drill: 0, endgame: endgameDue, antiGaffe: antiGaffeDue } as DueCounts,
+			streak,
+			puzzleGoal
+		};
+	}
 
 	// ── User moves (needed for gap finder + scope filtering) ────────────
 	const moves = await db
 		.select()
 		.from(userMove)
-		.where(and(eq(userMove.repertoireId, activeRepertoireId), eq(userMove.userId, userId)));
+		.where(and(eq(userMove.repertoireId, activeRep.id), eq(userMove.userId, userId)));
 
 	// ── Gap Finder (players DB, rating window centered on trainerRating) ────
 	const gapRatingLabel = gapRatingWindow(settings?.trainerRating ?? null).label;
@@ -124,25 +153,17 @@ export const load: PageServerLoad = async ({ parent, locals, cookies }) => {
 		.select()
 		.from(userRepertoireMove)
 		.where(
-			and(
-				eq(userRepertoireMove.userId, userId),
-				eq(userRepertoireMove.repertoireId, activeRepertoireId)
-			)
+			and(eq(userRepertoireMove.userId, userId), eq(userRepertoireMove.repertoireId, activeRep.id))
 		);
 
 	// Scope-filter: only cards whose fromFen is reachable from start position.
 	const scopedCards = scopeCards(activeRep, moves, allCards);
 
-	const now = new Date();
 	const totalCards = scopedCards.length;
 
 	// ── To do (due counts per module) ───────────────────────────────────
 	// The drill count comes from the cards already loaded above, the other two
-	// from the same functions the top-menu badges use.
-	const [endgameDue, antiGaffeDue] = await Promise.all([
-		countDueEndgame(userId),
-		countDueAntiGaffe(userId)
-	]);
+	// from the same functions the top-menu badges use (computed earlier).
 	const todo: DueCounts = {
 		drill: scopedCards.filter((c) => isDue(c, now)).length,
 		endgame: endgameDue,
@@ -168,47 +189,6 @@ export const load: PageServerLoad = async ({ parent, locals, cookies }) => {
 		else if (s === 3) cardStates.relearning++;
 	}
 
-	// ── Streak (consecutive local days with any study activity) ─────────
-	// Activity = a completed drill session, an endgame or anti-gaffe review,
-	// or a puzzle attempt. Days are calendar days in the browser's timezone
-	// (cookie), not UTC. A streak doesn't break until a full day is missed:
-	// if today has no activity yet but yesterday does, counting starts from
-	// yesterday.
-	const dayOf = makeDayFormatter(resolveTimeZone(cookies.get('tz')));
-	const [drillDays, endgameDays, gaffeDays, puzzleDays] = await Promise.all([
-		db
-			.select({ at: drillSession.completedAt })
-			.from(drillSession)
-			.where(and(eq(drillSession.userId, userId), gt(drillSession.completedAt, new Date(0)))),
-		db
-			.select({ at: endgameReviewLog.reviewedAt })
-			.from(endgameReviewLog)
-			.where(eq(endgameReviewLog.userId, userId)),
-		db
-			.select({ at: antiGaffeReviewLog.reviewedAt })
-			.from(antiGaffeReviewLog)
-			.where(eq(antiGaffeReviewLog.userId, userId)),
-		db
-			.select({ at: puzzleAttempt.attemptedAt })
-			.from(puzzleAttempt)
-			.where(eq(puzzleAttempt.userId, userId))
-	]);
-
-	const activeDays = new Set<string>();
-	for (const rows of [drillDays, endgameDays, gaffeDays, puzzleDays]) {
-		for (const r of rows) {
-			if (r.at) activeDays.add(dayOf(r.at));
-		}
-	}
-
-	let streak = 0;
-	let day = dayOf(now);
-	if (!activeDays.has(day)) day = previousDay(day);
-	while (activeDays.has(day)) {
-		streak++;
-		day = previousDay(day);
-	}
-
 	// ── Accuracy Trend (last 14 completed sessions of the active repertoire) ─
 	const recentSessionRows = await db
 		.select({
@@ -220,7 +200,7 @@ export const load: PageServerLoad = async ({ parent, locals, cookies }) => {
 		.where(
 			and(
 				eq(drillSession.userId, userId),
-				eq(drillSession.repertoireId, activeRepertoireId),
+				eq(drillSession.repertoireId, activeRep.id),
 				gt(drillSession.completedAt, new Date(0))
 			)
 		)
@@ -245,39 +225,6 @@ export const load: PageServerLoad = async ({ parent, locals, cookies }) => {
 			san: c.san,
 			lapses: c.lapses ?? 0
 		}));
-
-	// ── Puzzle Goal (solved count within current period) ────────────────
-	let puzzleGoal: { count: number; frequency: string; solved: number } | null = null;
-
-	if (settings?.puzzleGoalCount && settings?.puzzleGoalFrequency) {
-		const periodStart = new Date(now);
-		periodStart.setUTCHours(0, 0, 0, 0);
-
-		if (settings.puzzleGoalFrequency === 'weekly') {
-			// Week starts Monday: getUTCDay() 0=Sun,1=Mon,...,6=Sat
-			const dow = periodStart.getUTCDay();
-			periodStart.setUTCDate(periodStart.getUTCDate() - (dow === 0 ? 6 : dow - 1));
-		} else if (settings.puzzleGoalFrequency === 'monthly') {
-			periodStart.setUTCDate(1);
-		}
-
-		const [result] = await db
-			.select({ solved: count() })
-			.from(puzzleAttempt)
-			.where(
-				and(
-					eq(puzzleAttempt.userId, userId),
-					eq(puzzleAttempt.solved, true),
-					gte(puzzleAttempt.attemptedAt, periodStart)
-				)
-			);
-
-		puzzleGoal = {
-			count: settings.puzzleGoalCount,
-			frequency: settings.puzzleGoalFrequency,
-			solved: Number(result.solved)
-		};
-	}
 
 	return {
 		repertoires,
