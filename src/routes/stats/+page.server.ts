@@ -16,8 +16,7 @@ import type { PageServerLoad } from './$types';
 import { db } from '$lib/db';
 import { userMove, userRepertoireMove, reviewLog } from '$lib/db/schema';
 import { eq, and, inArray } from 'drizzle-orm';
-import { fenKey } from '$lib/fen';
-import { getEffectiveStartFens, buildInScopeFens } from '$lib/repertoire';
+import { scopeCards } from '$lib/server/due-counts';
 import { lookupEcoBatch } from '$lib/eco';
 import { loadFsrsConfig } from '$lib/server/fsrs-config';
 import { State, Rating } from '$lib/fsrs';
@@ -104,13 +103,7 @@ export const load: PageServerLoad = async ({ parent, locals }) => {
 			)
 		);
 
-	const startFens = getEffectiveStartFens(
-		activeRep.startFen ?? null,
-		moves,
-		activeRep.color as 'WHITE' | 'BLACK'
-	);
-	const inScope = buildInScopeFens(startFens, moves);
-	const scopedCards = allCards.filter((c) => inScope.has(fenKey(c.fromFen)));
+	const scopedCards = scopeCards(activeRep, moves, allCards);
 
 	if (scopedCards.length === 0) {
 		return { ...empty, repertoires };
