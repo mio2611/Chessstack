@@ -24,6 +24,7 @@
 	import { Chess } from 'chess.js';
 	import { initSounds, setSoundEnabled, playCorrect, playIncorrect } from '$lib/sounds';
 	import { toFullFen } from '$lib/fen';
+	import { refreshNavCounts } from '$lib/stores/navCounts';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -159,6 +160,7 @@
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ cardId: card.id, rating })
 			});
+			void refreshNavCounts();
 		} catch {
 			// Unlike a failed move, a failed grade here silently leaves this
 			// card's SR schedule stale — worth saying so, not staying quiet.

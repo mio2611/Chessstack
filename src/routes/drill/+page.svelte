@@ -47,6 +47,7 @@
 	} from '$lib/sounds';
 	import { tutorialStep } from '$lib/stores/tutorial';
 	import { getEffectiveStartFens, buildInScopeFens } from '$lib/repertoire';
+	import { refreshNavCounts } from '$lib/stores/navCounts';
 
 	// Shape of a move row from the server (user_move table).
 	interface RepertoireMove {
@@ -1024,6 +1025,7 @@
 				body: JSON.stringify({ cardId: currentCard.id, rating })
 			});
 			if (!res.ok) throw new Error(`Grade failed: ${res.status}`);
+			void refreshNavCounts();
 		} catch (err) {
 			console.error('Failed to grade card:', err);
 			// Don't block the user from continuing on a network error.
@@ -1060,6 +1062,7 @@
 				})
 			});
 			if (!res.ok) throw new Error(`Undo failed: ${res.status}`);
+			void refreshNavCounts();
 
 			// Roll back local session stats.
 			totalReviewed--;
@@ -1145,7 +1148,11 @@
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ cardId: card.id, rating })
-		}).catch((err) => console.error('Failed to auto-grade:', err));
+		})
+			.then((res) => {
+				if (res.ok) void refreshNavCounts();
+			})
+			.catch((err) => console.error('Failed to auto-grade:', err));
 
 		totalReviewed++;
 		if (rating >= 3) correctCount++;

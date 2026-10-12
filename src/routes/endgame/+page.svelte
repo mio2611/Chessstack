@@ -32,6 +32,7 @@
 		playIncorrect
 	} from '$lib/sounds';
 	import { toFullFen } from '$lib/fen';
+	import { refreshNavCounts } from '$lib/stores/navCounts';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -335,6 +336,7 @@
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ cardId: card.id, rating, mode })
 			});
+			void refreshNavCounts();
 		} catch {
 			// Unlike puzzles' attempt recording, a failed grade here silently
 			// leaves this card's SR schedule stale — worth saying so, not
