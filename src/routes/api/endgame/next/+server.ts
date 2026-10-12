@@ -2,7 +2,8 @@
 //
 // Priority order:
 //   1. Any endgame_card already due for this user (due <= now), earliest due first.
-//   2. Otherwise, the next never-seen position, in the source catalogue's own
+//   2. Otherwise, the next never-graded position (never presented, or presented
+//      but abandoned before grading, i.e. card row with due NULL), in the source catalogue's own
 //      fixed category order (Basic, Pawn, Bishop, Knight, Knight-Bishop,
 //      Rook-Pawn, Rook-Pieces, Queen — see scripts/endgame-import.py), then
 //      subcategory, then fen — not alphabetical, which would scramble that
@@ -20,7 +21,7 @@ import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { db } from '$lib/db';
 import { endgameCard, endgamePosition } from '$lib/db/schema';
-import { eq, and, lte, notInArray, sql } from 'drizzle-orm';
+import { eq, and, lte, isNotNull, notInArray, sql } from 'drizzle-orm';
 
 // Matches the category order in the source catalogue (see
 // scripts/endgame-import.py's SOURCE_URL categories), not alphabetical.
@@ -60,11 +61,14 @@ export const GET: RequestHandler = async ({ locals }) => {
 		});
 	}
 
-	// 2. Next never-seen position, in fixed catalogue order.
+	// 2. Next never-graded position, in fixed catalogue order. A card whose due
+	// is NULL was created on presentation but never graded (session abandoned):
+	// it is not "seen", otherwise it would be orphaned forever (step 1 skips
+	// NULL due, and the badge ignores it by design).
 	const seenFensSubquery = db
 		.select({ fen: endgameCard.fen })
 		.from(endgameCard)
-		.where(eq(endgameCard.userId, userId));
+		.where(and(eq(endgameCard.userId, userId), isNotNull(endgameCard.due)));
 
 	const categoryOrderCase = sql`CASE ${endgamePosition.category} ${sql.join(
 		CATEGORY_ORDER.map((c, i) => sql`WHEN ${c} THEN ${i}`),
