@@ -4,13 +4,15 @@
 //   - Deck composition (New / Young+Learning / Mature)
 //   - Workload forecast (due cards for the next 14 days, colour-split by maturity)
 //   - True retention (observed success rate vs. the configured target, from review_log)
+//   - Daily review/maturity aggregates for the retention and matured-cards charts
 //   - Per-opening breakdown (lapse concentration by opening name)
 //
-// "Mature" follows the Anki convention: scheduledDays > 21. This is
-// deliberately different from the dashboard's `masteredCount`, which counts
-// state === Review (FSRS "graduated") regardless of interval length — a
-// card can be in the Review state with an interval of only a few days.
-// The two numbers are not meant to match.
+// "Mature" follows the Anki convention: Review state and scheduledDays >= 21
+// (see isMature in $lib/stats-aggregation). This is deliberately different
+// from the dashboard's `masteredCount`, which counts state === Review (FSRS
+// "graduated") regardless of interval length — a card can be in the Review
+// state with an interval of only a few days. The two numbers are not meant
+// to match.
 
 import type { PageServerLoad } from './$types';
 import { db } from '$lib/db';
@@ -20,8 +22,14 @@ import { scopeCards } from '$lib/server/due-counts';
 import { lookupEcoBatch } from '$lib/eco';
 import { loadFsrsConfig } from '$lib/server/fsrs-config';
 import { State, Rating } from '$lib/fsrs';
+import { resolveTimeZone, makeDayFormatter } from '$lib/local-days';
+import {
+	buildDailyStats,
+	countsForRetention,
+	isMature,
+	type DailyStat
+} from '$lib/stats-aggregation';
 
-const MATURE_THRESHOLD_DAYS = 21;
 const FORECAST_DAYS = 14;
 const OPENING_STATS_LIMIT = 8;
 
@@ -45,7 +53,7 @@ export interface RetentionBucket {
 }
 
 export interface RetentionStats {
-	youngLearning: RetentionBucket;
+	young: RetentionBucket;
 	mature: RetentionBucket;
 	targetRetention: number;
 	since: number | null; // unix seconds of the earliest review_log row counted, or null
@@ -60,20 +68,26 @@ export interface OpeningStat {
 	lapseRate: number; // totalLapses / totalCards
 }
 
-export const load: PageServerLoad = async ({ parent, locals }) => {
+export const load: PageServerLoad = async ({ parent, locals, cookies }) => {
 	const { repertoires, activeRepertoireId } = await parent();
+
+	// Calendar days are the viewer's local days (tz cookie), like the dashboard streak.
+	const timeZone = resolveTimeZone(cookies.get('tz'));
+	const today = makeDayFormatter(timeZone)(new Date());
 
 	const empty = {
 		repertoires,
 		deckComposition: { new_: 0, youngLearning: 0, mature: 0, total: 0 } as DeckComposition,
 		forecast: [] as ForecastDay[],
 		retention: {
-			youngLearning: { totalReviews: 0, successCount: 0, observedRetention: null },
+			young: { totalReviews: 0, successCount: 0, observedRetention: null },
 			mature: { totalReviews: 0, successCount: 0, observedRetention: null },
 			targetRetention: 0.9,
 			since: null
 		} as RetentionStats,
-		openingStats: [] as OpeningStat[]
+		openingStats: [] as OpeningStat[],
+		dailyStats: [] as DailyStat[],
+		today
 	};
 
 	if (!activeRepertoireId || repertoires.length === 0 || !locals.user) {
@@ -112,7 +126,7 @@ export const load: PageServerLoad = async ({ parent, locals }) => {
 	const now = new Date();
 
 	// ── Deck Composition (New / Young+Learning / Mature) ──────────────────
-	// Mature = graduated (state Review) AND interval > 21 days, matching
+	// Mature = graduated (state Review) AND interval >= 21 days, matching
 	// Anki's definition rather than the dashboard's looser "state === Review".
 	let newCount = 0;
 	let matureCount = 0;
@@ -120,7 +134,7 @@ export const load: PageServerLoad = async ({ parent, locals }) => {
 		const state = c.state ?? State.New;
 		if (state === State.New) {
 			newCount++;
-		} else if (state === State.Review && (c.scheduledDays ?? 0) > MATURE_THRESHOLD_DAYS) {
+		} else if (isMature(state, c.scheduledDays)) {
 			matureCount++;
 		}
 	}
@@ -145,64 +159,64 @@ export const load: PageServerLoad = async ({ parent, locals }) => {
 	todayStart.setUTCHours(0, 0, 0, 0);
 	for (const c of scopedCards) {
 		if (!c.due) continue;
-		const isMature = c.state === State.Review && (c.scheduledDays ?? 0) > MATURE_THRESHOLD_DAYS;
+		const mature = isMature(c.state ?? State.New, c.scheduledDays);
 		const dueDay = new Date(c.due);
 		dueDay.setUTCHours(0, 0, 0, 0);
 		let dayOffset = Math.round((dueDay.getTime() - todayStart.getTime()) / 86_400_000);
 		if (dayOffset < 0) dayOffset = 0; // overdue cards count against today
 		if (dayOffset >= FORECAST_DAYS) continue;
-		if (isMature) forecastBuckets[dayOffset].mature++;
+		if (mature) forecastBuckets[dayOffset].mature++;
 		else forecastBuckets[dayOffset].youngLearning++;
 	}
 
-	// ── True Retention (from review_log — only exists from deployment date
-	//    of the fsrs-review-log branch onward, nothing retroactive) ───────
-	// Split by Young+Learning vs Mature, classified using the card's state
-	// AT THE TIME OF THAT REVIEW (state_before/scheduled_days_before), not
-	// its state today — a card reviewed while young six weeks ago should
-	// count toward "young" retention even if it has since matured.
-	// Mixing both buckets into one number hides which one actually needs
-	// attention: poor young retention usually means learning steps are too
-	// aggressive, poor mature retention usually means requestRetention or
-	// the FSRS weights themselves are miscalibrated.
+	// ── True Retention + chart aggregates (from review_log — only exists from
+	//    the deployment date of the fsrs-review-log branch onward, nothing
+	//    retroactive) ────────────────────────────────────────────────────
+	// Same definition as Anki: only scheduled reviews (source DRILL) of cards
+	// that were in the Review state count. First views and learning/relearning
+	// steps are excluded, and so are game-review failures (REVIEW_DEVIATION),
+	// which are not scheduled reviews. Young/Mature is decided by the card's
+	// interval AT THE TIME OF THAT REVIEW (state_before/scheduled_days_before),
+	// not its state today.
 	const fsrsConfig = await loadFsrsConfig(userId);
 	const cardIds = scopedCards.map((c) => c.id);
 	const logRows = await db
 		.select({
 			rating: reviewLog.rating,
 			reviewedAt: reviewLog.reviewedAt,
+			source: reviewLog.source,
 			stateBefore: reviewLog.stateBefore,
-			scheduledDaysBefore: reviewLog.scheduledDaysBefore
+			scheduledDaysBefore: reviewLog.scheduledDaysBefore,
+			stateAfter: reviewLog.stateAfter,
+			scheduledDaysAfter: reviewLog.scheduledDaysAfter
 		})
 		.from(reviewLog)
 		.where(and(eq(reviewLog.userId, userId), inArray(reviewLog.cardId, cardIds)));
 
-	const youngLearning: RetentionBucket = {
-		totalReviews: 0,
-		successCount: 0,
-		observedRetention: null
-	};
+	const young: RetentionBucket = { totalReviews: 0, successCount: 0, observedRetention: null };
 	const mature: RetentionBucket = { totalReviews: 0, successCount: 0, observedRetention: null };
 	let earliestReview: Date | null = null;
 	for (const row of logRows) {
-		const wasMature =
-			row.stateBefore === State.Review && (row.scheduledDaysBefore ?? 0) > MATURE_THRESHOLD_DAYS;
-		const bucket = wasMature ? mature : youngLearning;
+		if (!countsForRetention(row)) continue;
+		const bucket = isMature(row.stateBefore, row.scheduledDaysBefore) ? mature : young;
 		bucket.totalReviews++;
 		if (row.rating !== Rating.Again) bucket.successCount++;
 		if (!earliestReview || row.reviewedAt < earliestReview) earliestReview = row.reviewedAt;
 	}
-	youngLearning.observedRetention =
-		youngLearning.totalReviews > 0 ? youngLearning.successCount / youngLearning.totalReviews : null;
+	young.observedRetention = young.totalReviews > 0 ? young.successCount / young.totalReviews : null;
 	mature.observedRetention =
 		mature.totalReviews > 0 ? mature.successCount / mature.totalReviews : null;
 
 	const retention: RetentionStats = {
-		youngLearning,
+		young,
 		mature,
 		targetRetention: fsrsConfig.requestRetention ?? 0.9,
 		since: earliestReview ? Math.floor(earliestReview.getTime() / 1000) : null
 	};
+
+	// One entry per local day over the whole life of the log; the client picks
+	// the period (1 month / 1 year / deck life) and buckets it.
+	const dailyStats = buildDailyStats(logRows, timeZone);
 
 	// ── Per-Opening Stats (lapse concentration by recognised opening) ─────
 	const ecoByFen = await lookupEcoBatch(
@@ -250,6 +264,8 @@ export const load: PageServerLoad = async ({ parent, locals }) => {
 		deckComposition,
 		forecast: forecastBuckets,
 		retention,
-		openingStats
+		openingStats,
+		dailyStats,
+		today
 	};
 };
