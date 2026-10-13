@@ -28,7 +28,7 @@
 	import OpeningName from '$lib/components/OpeningName.svelte';
 	import NoteText from '$lib/components/NoteText.svelte';
 	import { fenKey, STARTING_FEN } from '$lib/fen';
-	import { SvelteMap } from 'svelte/reactivity';
+	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import { untrack } from 'svelte';
 	import { onMount } from 'svelte';
 	import { invalidateAll } from '$app/navigation';
@@ -230,6 +230,13 @@
 
 	// Index into allLines — which line we're currently drilling.
 	let currentLineIdx = $state(0);
+
+	// Card ids already graded during this line-mode session. Lines share
+	// prefixes, so the same card sits on many lines; without this set every
+	// replay of a shared prefix re-graded the card (extra FSRS reviews, extra
+	// review_log rows, inflated counters) because allDueCards is never
+	// refreshed mid-session. First grade wins.
+	const gradedCardIds = new SvelteSet<number>();
 
 	// The line currently being drilled.
 	let currentLine = $state<LineStep[]>([]);
@@ -1129,6 +1136,8 @@
 	function autoGradeStep(step: LineStep, rating: number): void {
 		const card = findCardForStep(step);
 		if (!card) return; // no SR card for this move (might not exist)
+		if (gradedCardIds.has(card.id)) return; // already graded in this session
+		gradedCardIds.add(card.id);
 
 		// Create session on first grade (same as card mode).
 		if (sessionId === null) {
@@ -1166,6 +1175,7 @@
 		const scoped =
 			data.drillMode === 'all' ? raw : raw.filter((line) => lineHasDueStep(line, allDueCards));
 		allLines = sortLinesByWeakness(scoped, allDueCards);
+		gradedCardIds.clear();
 		currentLineIdx = 0;
 		lineComplete = false;
 		totalReviewed = 0;
@@ -1360,6 +1370,21 @@
 	// Advance to the next line after the interstitial.
 	async function advanceToNextLine(): Promise<void> {
 		currentLineIdx++;
+
+		// In due mode, skip lines whose due cards were all already graded via
+		// an earlier line sharing the same prefix: they are no longer due.
+		if (data.drillMode !== 'all') {
+			while (
+				currentLineIdx < allLines.length &&
+				!allLines[currentLineIdx].some((s) => {
+					if (!s.isUserMove) return false;
+					const c = findCardForStep(s);
+					return c !== null && !gradedCardIds.has(c.id);
+				})
+			) {
+				currentLineIdx++;
+			}
+		}
 
 		if (currentLineIdx >= allLines.length) {
 			// All lines done — finalize session. lineComplete must be reset here,
