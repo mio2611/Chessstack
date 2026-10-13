@@ -1,6 +1,8 @@
 <script lang="ts">
 	import type { PageData } from './$types';
 	import { SvelteDate } from 'svelte/reactivity';
+	import RetentionChart from '$lib/components/stats/RetentionChart.svelte';
+	import MaturedChart from '$lib/components/stats/MaturedChart.svelte';
 
 	let { data }: { data: PageData } = $props();
 
@@ -78,8 +80,8 @@
 					</div>
 				</div>
 				<p class="widget-note">
-					Mature = interval &gt; 21 days (Anki's convention). This differs from the dashboard's
-					"mastered" count, which only tracks FSRS state, not interval length.
+					Mature = interval of 21 days or more (Anki's convention). This differs from the
+					dashboard's "mastered" count, which only tracks FSRS state, not interval length.
 				</p>
 			</div>
 
@@ -123,32 +125,31 @@
 			<!-- True Retention -->
 			<div class="widget widget-wide">
 				<div class="widget-label">True Retention</div>
-				{#if retention.youngLearning.totalReviews === 0 && retention.mature.totalReviews === 0}
+				{#if retention.young.totalReviews === 0 && retention.mature.totalReviews === 0}
 					<p class="widget-empty">
-						No graded reviews logged yet. This starts accumulating from your first drill session
+						No scheduled reviews logged yet. This starts accumulating from your first drill session
 						after this feature was deployed — nothing before that can be reconstructed.
 					</p>
 				{:else}
 					<div class="retention-buckets">
 						<div class="retention-bucket">
-							<div class="retention-bucket-label">Young + Learning</div>
-							{#if retention.youngLearning.totalReviews === 0}
+							<div class="retention-bucket-label">Young</div>
+							{#if retention.young.totalReviews === 0}
 								<p class="widget-empty">No reviews yet in this bucket.</p>
 							{:else}
 								<div class="retention-row">
 									<span
 										class="retention-value {retentionDiffClass(
-											retention.youngLearning.observedRetention,
+											retention.young.observedRetention,
 											retention.targetRetention
-										)}">{Math.round((retention.youngLearning.observedRetention ?? 0) * 100)}%</span
+										)}">{Math.round((retention.young.observedRetention ?? 0) * 100)}%</span
 									>
 									<span class="retention-target"
 										>target {Math.round(retention.targetRetention * 100)}%</span
 									>
 								</div>
 								<p class="widget-note">
-									{retention.youngLearning.successCount} of {retention.youngLearning.totalReviews} graded
-									Good/Easy
+									{retention.young.successCount} of {retention.young.totalReviews} graded Good/Easy
 								</p>
 							{/if}
 						</div>
@@ -175,18 +176,33 @@
 						</div>
 					</div>
 					<p class="widget-note">
-						Split by the card's state at the time of each review, not its state today. Low
-						Young+Learning retention usually points to learning steps being too aggressive; low
-						Mature retention usually points to the target retention or FSRS weights being out of
-						calibration.
+						Same definition as Anki: only scheduled drill reviews of cards already in the Review
+						state count, so first views, learning steps and game-review failures are left out. Young
+						means an interval under 21 days at the time of the review, Mature 21 days or more.
+						Persistently low retention in either bucket points to the target retention or the FSRS
+						weights being out of calibration.
 						{#if retention.since}
 							Tracking since {new Date(retention.since * 1000).toLocaleDateString()}.
 						{/if}
-						{#if retention.youngLearning.totalReviews + retention.mature.totalReviews < 100}
+						{#if retention.young.totalReviews + retention.mature.totalReviews < 100}
 							Still an early sample overall — this becomes more reliable as more reviews accumulate.
 						{/if}
 					</p>
 				{/if}
+			</div>
+
+			<!-- Retention chart -->
+			<div class="widget widget-wide">
+				<RetentionChart
+					daily={data.dailyStats}
+					today={data.today}
+					targetRetention={retention.targetRetention}
+				/>
+			</div>
+
+			<!-- Net matured cards -->
+			<div class="widget widget-wide">
+				<MaturedChart daily={data.dailyStats} today={data.today} />
 			</div>
 
 			<!-- Per-Opening Stats -->
