@@ -27,8 +27,8 @@ export const MAX_EVALUATED_MOVES = 5;
 /** A move beyond the first MIN_EVALUATED_MOVES is only evaluated if it accounts for at least this share of the games listed for the position. */
 export const MIN_GAMES_SHARE = 0.05;
 
-/** Always evaluate at least this many moves (when they exist). Kept from the time the coloring compared moves with each other; the parent position is now the reference, so this only fixes how many moves get a color. */
-export const MIN_EVALUATED_MOVES = 2;
+/** Always evaluate at least this many moves (when they exist), whatever their share of the games: guarantees the most played move is colored even if the shares are degenerate (no game counted, very scattered list). Every move is compared with the parent position, not with its siblings, so one is enough. */
+export const MIN_EVALUATED_MOVES = 1;
 
 /** Eval of a resulting position, in WHITE's perspective (same convention as the Engine tab). */
 export interface ChildEval {
