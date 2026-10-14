@@ -19,7 +19,6 @@
 <script lang="ts">
 	import { SvelteMap } from 'svelte/reactivity';
 	import type { ImportConflict, ImportPreview } from '$lib/pgn/detectConflicts';
-	import type { PgnEdge } from '$lib/pgn/parseVariations';
 	import type { DrawShape } from '@lichess-org/chessground/draw';
 	import ChessBoard from '$lib/components/ChessBoard.svelte';
 	import { Chess } from 'chess.js';
@@ -55,7 +54,12 @@
 
 	// ── Result state ─────────────────────────────────────────────────────────
 
-	let result = $state<{ inserted: number; replaced: number; skipped: number } | null>(null);
+	let result = $state<{
+		inserted: number;
+		replaced: number;
+		skipped: number;
+		unreachable: number;
+	} | null>(null);
 	let importError = $state('');
 
 	// ── Derived ──────────────────────────────────────────────────────────────
@@ -196,14 +200,6 @@
 
 	// ── Execute import ───────────────────────────────────────────────────────
 
-	/** Find annotation for a move from the preview edges. */
-	function findAnnotation(fromFen: string, san: string): string | null {
-		if (!preview) return null;
-		const allEdges: PgnEdge[] = [...preview.newUserMoves, ...preview.newOpponentMoves];
-		const edge = allEdges.find((e) => e.fromFen === fromFen && e.san === san);
-		return edge?.annotation ?? null;
-	}
-
 	async function handleImport() {
 		if (!preview) return;
 		step = 'importing';
@@ -228,7 +224,7 @@
 				moves.push({
 					fromFen: conflict.fromFen,
 					san: chosen,
-					annotation: findAnnotation(conflict.fromFen, chosen)
+					annotation: conflict.annotations[chosen] ?? null
 				});
 				// If the chosen move differs from the existing repertoire move, it's a replacement
 				if (conflict.existingMove && chosen !== conflict.existingMove) {
@@ -239,7 +235,7 @@
 
 		if (moves.length === 0) {
 			step = 'done';
-			result = { inserted: 0, replaced: 0, skipped: 0 };
+			result = { inserted: 0, replaced: 0, skipped: 0, unreachable: 0 };
 			return;
 		}
 
@@ -471,7 +467,13 @@
 							{#if result.skipped > 0}
 								<p>{result.skipped} duplicate{result.skipped !== 1 ? 's' : ''} skipped</p>
 							{/if}
-							{#if result.inserted === 0 && result.replaced === 0}
+							{#if result.unreachable > 0}
+								<p>
+									{result.unreachable} move{result.unreachable !== 1 ? 's' : ''} left out: not reachable
+									from the starting position (continuations of a move you did not keep)
+								</p>
+							{/if}
+							{#if result.inserted === 0 && result.replaced === 0 && result.unreachable === 0}
 								<p>No changes made — all moves were already in your repertoire.</p>
 							{/if}
 						</div>
