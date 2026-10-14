@@ -17,6 +17,8 @@ export interface ImportConflict {
 	fromFen: string; // full FEN of the conflicting position
 	existingMove: string | null; // SAN already in repertoire (null for PGN_INTERNAL)
 	alternatives: string[]; // all competing SANs (includes existingMove if present)
+	/** PGN annotation per competing SAN (only SANs that come from the PGN). */
+	annotations: Record<string, string | null>;
 	source: 'REPERTOIRE_VS_PGN' | 'PGN_INTERNAL';
 }
 
@@ -104,6 +106,9 @@ export function detectConflicts(
 				fromFen: sanMap.values().next().value!.fromFen,
 				existingMove: existingSan ?? null,
 				alternatives: Array.from(allAlternatives),
+				annotations: Object.fromEntries(
+					Array.from(sanMap, ([san, edge]) => [san, edge.annotation])
+				),
 				source: 'PGN_INTERNAL'
 			});
 		} else {
@@ -119,6 +124,7 @@ export function detectConflicts(
 					fromFen: sanMap.get(pgnSan)!.fromFen,
 					existingMove: existingSan,
 					alternatives: [existingSan, pgnSan],
+					annotations: { [pgnSan]: sanMap.get(pgnSan)!.annotation },
 					source: 'REPERTOIRE_VS_PGN'
 				});
 			} else {
