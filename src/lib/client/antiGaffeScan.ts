@@ -11,11 +11,20 @@
 // batched at the end — a scan can legitimately run for many minutes (depth
 // 20, no time cap, see $lib/client/stockfish), so an interrupted session
 // shouldn't lose what it already found.
+//
+// A game is only marked as scanned (POST /api/anti-gaffe/scan-complete) when
+// every position was evaluated at full depth. If the engine fails on any
+// position (load error, crash, watchdog timeout, shallow partial result),
+// the scan stops, nothing is marked, and the outcome is 'failed' so the
+// caller can say so and let the user retry. Candidates already posted
+// stay (they are idempotent per game and ply, see the POST handler).
 
 import { evaluateGame, type EvalGameProgress, type PositionEval } from './gameEval';
 
 const MIN_CP_LOSS = 100;
 const EVAL_WINDOW = 300;
+
+export type AntiGaffeScanOutcome = 'complete' | 'cancelled' | 'failed';
 
 export interface AntiGaffeScanOptions {
 	gameSource: 'imported' | 'reviewed';
@@ -56,7 +65,9 @@ async function markScanComplete(gameSource: string, gameId: number): Promise<voi
 	}
 }
 
-export async function scanGameForAntiGaffe(options: AntiGaffeScanOptions): Promise<void> {
+export async function scanGameForAntiGaffe(
+	options: AntiGaffeScanOptions
+): Promise<AntiGaffeScanOutcome> {
 	const {
 		gameSource,
 		gameId,
@@ -75,11 +86,14 @@ export async function scanGameForAntiGaffe(options: AntiGaffeScanOptions): Promi
 	// move it was without re-parsing the FEN.
 	const userMoveParity = playerColor === 'WHITE' ? 0 : 1;
 
-	await evaluateGame(fenHistory, {
+	const summary = await evaluateGame(fenHistory, {
 		isCancelled,
 		onProgress,
+		stopOnFailure: true,
 		onResult: (ply, _fen, result) => {
-			evals[ply] = result;
+			// A partial (shallower) evaluation is not trusted: it would be
+			// compared as if it were depth 20 and could post a false candidate.
+			evals[ply] = result?.completed ? result : null;
 
 			// The move that was just fully evaluated (both endpoints known) is
 			// the one from fenHistory[ply-1] to fenHistory[ply].
@@ -111,6 +125,9 @@ export async function scanGameForAntiGaffe(options: AntiGaffeScanOptions): Promi
 		}
 	});
 
-	if (isCancelled?.()) return;
+	if (summary.cancelled || isCancelled?.()) return 'cancelled';
+	if (summary.failures > 0) return 'failed';
+
 	await markScanComplete(gameSource, gameId);
+	return 'complete';
 }

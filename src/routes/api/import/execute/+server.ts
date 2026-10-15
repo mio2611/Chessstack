@@ -9,7 +9,12 @@
 //   replacements: { fromFen: string, san: string }[]     // conflicts resolved by user
 // }
 //
-// Output: { inserted: number, replaced: number, skipped: number }
+// Output: { inserted: number, replaced: number, skipped: number, unreachable: number }
+//
+// Only moves reachable from the starting position are written. A move whose
+// position cannot be reached through the repertoire as it will stand after the
+// import (typically the continuation of a PGN move the user refused in a
+// conflict) is not inserted and is counted in `unreachable`.
 //
 // Security: toFen is computed server-side for every move (never from client).
 // Mirrors the pattern in POST /api/moves and POST /api/review/add-move.
@@ -20,7 +25,7 @@ import { Chess } from 'chess.js';
 import { db } from '$lib/db';
 import { repertoire, userMove, userRepertoireMove } from '$lib/db/schema';
 import { eq, and } from 'drizzle-orm';
-import { fenKey } from '$lib/fen';
+import { fenKey, STARTING_FEN } from '$lib/fen';
 
 // Transaction type extracted from db.transaction() callback parameter
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -62,6 +67,47 @@ async function deleteSubtreeInTx(
 		// Delete the move row itself.
 		await tx.delete(userMove).where(eq(userMove.id, child.id));
 	}
+}
+
+// fromFen -> (san -> toFen), for every move currently stored in a repertoire.
+type EdgeMap = Map<string, Map<string, string>>;
+
+async function loadEdges(tx: Transaction, repertoireId: number): Promise<EdgeMap> {
+	const rows = await tx
+		.select({ fromFen: userMove.fromFen, toFen: userMove.toFen, san: userMove.san })
+		.from(userMove)
+		.where(eq(userMove.repertoireId, repertoireId));
+
+	const edges: EdgeMap = new Map();
+	for (const r of rows) {
+		let children = edges.get(r.fromFen);
+		if (!children) {
+			children = new Map();
+			edges.set(r.fromFen, children);
+		}
+		children.set(r.san, r.toFen);
+	}
+	return edges;
+}
+
+// Every position (fenKey) reachable from the starting position by following
+// stored moves. The visited set makes repetition cycles harmless.
+function computeReachable(edges: EdgeMap): Set<string> {
+	const root = fenKey(STARTING_FEN);
+	const reachable = new Set<string>([root]);
+	const stack = [root];
+	while (stack.length > 0) {
+		const fen = stack.pop()!;
+		const children = edges.get(fen);
+		if (!children) continue;
+		for (const toFen of children.values()) {
+			if (!reachable.has(toFen)) {
+				reachable.add(toFen);
+				stack.push(toFen);
+			}
+		}
+	}
+	return reachable;
 }
 
 interface MoveInput {
@@ -159,125 +205,164 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 		let replaced = 0;
 		let skipped = 0;
 
-		for (const vm of validatedMoves) {
-			if (vm.isUserTurn) {
-				// Check for existing move at this position
-				const [existing] = await tx
-					.select()
-					.from(userMove)
-					.where(and(eq(userMove.repertoireId, repertoireId), eq(userMove.fromFen, vm.fromFen)));
+		// A move is only written when its position is reachable from the starting
+		// position through the repertoire as it will stand after the import. The
+		// client sends every new move of the PGN, including the continuations of
+		// moves the user refused in a conflict; those must not be stored, they
+		// would hang off a position nothing leads to.
+		//
+		// The list is not guaranteed to be in tree order (resolved conflicts are
+		// appended last), so it is processed in passes: each pass handles the moves
+		// whose position is reachable at that point and defers the others. A pass
+		// that handles nothing ends the loop, and what is left is unreachable.
+		let edges = await loadEdges(tx, repertoireId);
+		let reachable = computeReachable(edges);
+		let pending = validatedMoves;
+		let progress = true;
 
-				if (existing) {
-					if (existing.san === vm.san) {
-						// Exact same move — skip (idempotent)
-						skipped++;
+		while (pending.length > 0 && progress) {
+			progress = false;
+			const deferred: typeof validatedMoves = [];
+
+			for (const vm of pending) {
+				if (!reachable.has(vm.fromFen)) {
+					deferred.push(vm);
+					continue;
+				}
+				progress = true;
+
+				if (vm.isUserTurn) {
+					// Check for existing move at this position
+					const [existing] = await tx
+						.select()
+						.from(userMove)
+						.where(and(eq(userMove.repertoireId, repertoireId), eq(userMove.fromFen, vm.fromFen)));
+
+					if (existing) {
+						if (existing.san === vm.san) {
+							// Exact same move — skip (idempotent)
+							skipped++;
+							reachable.add(vm.toFen);
+							continue;
+						}
+
+						// Different move exists — check if user chose to replace it
+						const replaceKey = fenKey(vm.fromFen) + '|' + vm.san;
+						if (replacementSet.has(replaceKey)) {
+							// Before replacing, delete the old move's downstream subtree.
+							// When we change this move's san/toFen, children hanging off
+							// the OLD toFen become orphaned — unreachable from the tree
+							// root. We must remove them (and their SR cards) now.
+							await deleteSubtreeInTx(tx, user.id, repertoireId, existing.toFen);
+
+							// User chose this PGN move over the existing one — replace
+							await tx
+								.update(userMove)
+								.set({
+									san: vm.san,
+									toFen: vm.toFen,
+									source: 'PGN_IMPORT',
+									...(vm.notes != null ? { notes: vm.notes } : {})
+								})
+								.where(eq(userMove.id, existing.id));
+
+							// Update the SR card's SAN to match
+							await tx
+								.update(userRepertoireMove)
+								.set({ san: vm.san })
+								.where(
+									and(
+										eq(userRepertoireMove.userId, user.id),
+										eq(userRepertoireMove.repertoireId, repertoireId),
+										eq(userRepertoireMove.fromFen, vm.fromFen)
+									)
+								);
+
+							replaced++;
+
+							// The deleted subtree may have been part of the reachable set:
+							// recompute it from what is now stored.
+							edges = await loadEdges(tx, repertoireId);
+							reachable = computeReachable(edges);
+						} else {
+							// Not in replacements — keep existing (safety default). The
+							// PGN move is not stored, so its position is not reachable
+							// through it and its continuations will be left out.
+							skipped++;
+						}
 						continue;
 					}
 
-					// Different move exists — check if user chose to replace it
-					const replaceKey = fenKey(vm.fromFen) + '|' + vm.san;
-					if (replacementSet.has(replaceKey)) {
-						// Before replacing, delete the old move's downstream subtree.
-						// When we change this move's san/toFen, children hanging off
-						// the OLD toFen become orphaned — unreachable from the tree
-						// root. We must remove them (and their SR cards) now.
-						await deleteSubtreeInTx(tx, user.id, repertoireId, existing.toFen);
+					// No existing move — insert new move + SR card
+					await tx.insert(userMove).values({
+						userId: user.id,
+						repertoireId,
+						fromFen: vm.fromFen,
+						toFen: vm.toFen,
+						san: vm.san,
+						source: 'PGN_IMPORT',
+						notes: vm.notes,
+						createdAt: new Date()
+					});
 
-						// User chose this PGN move over the existing one — replace
-						await tx
-							.update(userMove)
-							.set({
-								san: vm.san,
-								toFen: vm.toFen,
-								source: 'PGN_IMPORT',
-								...(vm.notes != null ? { notes: vm.notes } : {})
-							})
-							.where(eq(userMove.id, existing.id));
+					await tx.insert(userRepertoireMove).values({
+						userId: user.id,
+						repertoireId,
+						fromFen: vm.fromFen,
+						san: vm.san,
+						due: new Date(),
+						state: 0, // New
+						reps: 0,
+						lapses: 0,
+						stability: null,
+						difficulty: null,
+						elapsedDays: null,
+						scheduledDays: null,
+						lastReview: null,
+						learningSteps: 0
+					});
 
-						// Update the SR card's SAN to match
-						await tx
-							.update(userRepertoireMove)
-							.set({ san: vm.san })
-							.where(
-								and(
-									eq(userRepertoireMove.userId, user.id),
-									eq(userRepertoireMove.repertoireId, repertoireId),
-									eq(userRepertoireMove.fromFen, vm.fromFen)
-								)
-							);
+					inserted++;
+					reachable.add(vm.toFen);
+				} else {
+					// Opponent's turn — multiple moves allowed, no SR card
+					const [existing] = await tx
+						.select()
+						.from(userMove)
+						.where(
+							and(
+								eq(userMove.repertoireId, repertoireId),
+								eq(userMove.fromFen, vm.fromFen),
+								eq(userMove.san, vm.san)
+							)
+						);
 
-						replaced++;
-					} else {
-						// Not in replacements — keep existing (safety default)
+					if (existing) {
 						skipped++;
+						reachable.add(vm.toFen);
+						continue;
 					}
-					continue;
+
+					await tx.insert(userMove).values({
+						userId: user.id,
+						repertoireId,
+						fromFen: vm.fromFen,
+						toFen: vm.toFen,
+						san: vm.san,
+						source: 'PGN_IMPORT',
+						notes: vm.notes,
+						createdAt: new Date()
+					});
+
+					inserted++;
+					reachable.add(vm.toFen);
 				}
-
-				// No existing move — insert new move + SR card
-				await tx.insert(userMove).values({
-					userId: user.id,
-					repertoireId,
-					fromFen: vm.fromFen,
-					toFen: vm.toFen,
-					san: vm.san,
-					source: 'PGN_IMPORT',
-					notes: vm.notes,
-					createdAt: new Date()
-				});
-
-				await tx.insert(userRepertoireMove).values({
-					userId: user.id,
-					repertoireId,
-					fromFen: vm.fromFen,
-					san: vm.san,
-					due: new Date(),
-					state: 0, // New
-					reps: 0,
-					lapses: 0,
-					stability: null,
-					difficulty: null,
-					elapsedDays: null,
-					scheduledDays: null,
-					lastReview: null,
-					learningSteps: 0
-				});
-
-				inserted++;
-			} else {
-				// Opponent's turn — multiple moves allowed, no SR card
-				const [existing] = await tx
-					.select()
-					.from(userMove)
-					.where(
-						and(
-							eq(userMove.repertoireId, repertoireId),
-							eq(userMove.fromFen, vm.fromFen),
-							eq(userMove.san, vm.san)
-						)
-					);
-
-				if (existing) {
-					skipped++;
-					continue;
-				}
-
-				await tx.insert(userMove).values({
-					userId: user.id,
-					repertoireId,
-					fromFen: vm.fromFen,
-					toFen: vm.toFen,
-					san: vm.san,
-					source: 'PGN_IMPORT',
-					notes: vm.notes,
-					createdAt: new Date()
-				});
-
-				inserted++;
 			}
+
+			pending = deferred;
 		}
 
-		return { inserted, replaced, skipped };
+		return { inserted, replaced, skipped, unreachable: pending.length };
 	});
 
 	return json(result);
