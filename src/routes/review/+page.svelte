@@ -370,6 +370,7 @@
 	let activeTab = $state<'deviation' | 'anti-gaffe'>('deviation');
 	let antiGaffeCandidates = $state<AntiGaffeCandidate[]>([]);
 	let antiGaffeScanProgress = $state<{ done: number; total: number } | null>(null);
+	let antiGaffeScanError = $state<string | null>(null);
 	let antiGaffeScanRunId = 0;
 	let antiGaffeActionLoading = new SvelteMap<number, boolean>();
 	// candidateId → the existing card's move, when accept returned a 409.
@@ -1483,13 +1484,14 @@
 	async function runAntiGaffeScan(): Promise<void> {
 		if (!analysis) return;
 		const myRunId = ++antiGaffeScanRunId;
+		antiGaffeScanError = null;
 
 		const ref = await ensureReviewedGameId();
 		if (!ref || myRunId !== antiGaffeScanRunId) return;
 
 		antiGaffeScanProgress = { done: 0, total: analysis.fenHistory.length };
 
-		await scanGameForAntiGaffe({
+		const outcome = await scanGameForAntiGaffe({
 			gameSource: ref.gameSource,
 			gameId: ref.gameId,
 			fenHistory: analysis.fenHistory,
@@ -1508,6 +1510,10 @@
 
 		if (myRunId !== antiGaffeScanRunId) return;
 		antiGaffeScanProgress = null;
+		if (outcome === 'failed') {
+			antiGaffeScanError =
+				'Scan interrupted: the engine failed on at least one position. This game is not marked as scanned. Candidates already found were kept.';
+		}
 		await loadAntiGaffeCandidates();
 	}
 
@@ -2533,6 +2539,10 @@
 					<button class="nav-btn analyze-btn" onclick={runAntiGaffeScan}>
 						▶ Scanner cette partie
 					</button>
+				{/if}
+
+				{#if antiGaffeScanError}
+					<div class="action-error">{antiGaffeScanError}</div>
 				{/if}
 
 				{#if antiGaffeCandidates.length === 0}
