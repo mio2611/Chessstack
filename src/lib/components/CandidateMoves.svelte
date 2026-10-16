@@ -27,6 +27,7 @@
 -->
 
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { RATING_BRACKETS, DEFAULT_BRACKET_ID } from '$lib/ratings';
 	import { Chess } from 'chess.js';
 	import { SvelteMap } from 'svelte/reactivity';
@@ -37,11 +38,14 @@
 		type ChildEval
 	} from '$lib/client/playerEvals';
 	import {
+		EngineUnavailableError,
 		evaluatePositionMultiPv,
 		cancelInteractiveSearches,
+		resetEngine,
 		TARGET_DEPTH as ENGINE_TARGET_DEPTH,
 		type MultiPvLine
 	} from '$lib/client/stockfish';
+	import { engineStatus } from '$lib/client/engineStatus.svelte';
 	import { getCachedEngineLines, cacheEngineLines } from '$lib/client/engineCache';
 
 	// How long to wait after the position stops changing before starting a
@@ -137,7 +141,14 @@
 	let engineCandidates = $state<Candidate[]>([]);
 	let engineLoading = $state(false);
 	let engineError = $state(false);
-	let engineAvailable = $state(true);
+	// The engine itself cannot be used (EngineUnavailableError): shown with a
+	// retry button. Distinct from engineNoMoves, which is a healthy engine
+	// looking at a position without legal moves (checkmate / stalemate).
+	let engineUnavailable = $state(false);
+	let engineNoMoves = $state(false);
+	// Bumped by the retry button (and by the automatic recovery below) so the
+	// Engine effect runs again for the same position.
+	let engineRetryToken = $state(0);
 	let engineDepth = $state(0);
 	let engineMaxDepth = $state(0);
 	// True once a search has finished, if it actually reached
@@ -345,8 +356,22 @@
 			annotation: null,
 			openingName: null
 		}));
-		engineAvailable = true;
+		engineNoMoves = false;
 	}
+
+	// Retry after an engine failure. User-initiated only (see resetEngine).
+	function retryEngine(): void {
+		resetEngine();
+		engineRetryToken++;
+	}
+
+	// If another surface restarted the engine (a scan or an analysis started
+	// from the review page) while this tab was showing "not available", search
+	// again instead of staying stale until the position changes.
+	$effect(() => {
+		// untrack: bumping the token reads it, and this effect must not depend on it.
+		if (engineUnavailable && engineStatus.state === 'ready') untrack(() => engineRetryToken++);
+	});
 
 	// ── Engine — client-side Stockfish (WASM, depth-20 fixed, no server round-trip) ──
 	// Runs entirely in the browser via $lib/client/stockfish — see that
@@ -357,6 +382,7 @@
 	// while clicking through the tree.
 	$effect(() => {
 		const fen = currentFen;
+		void engineRetryToken; // re-run on retry, for the same position
 		let cancelled = false;
 
 		// Same position as an earlier, finished search: show it at once, with
@@ -374,6 +400,7 @@
 			if (multiplier !== null) {
 				cancelInteractiveSearches();
 				engineError = false;
+				engineUnavailable = false;
 				engineDepth = ENGINE_TARGET_DEPTH;
 				engineMaxDepth = ENGINE_TARGET_DEPTH;
 				engineCompleted = true;
@@ -385,6 +412,8 @@
 
 		engineLoading = true;
 		engineError = false;
+		engineUnavailable = false;
+		engineNoMoves = false;
 		engineCandidates = [];
 		engineDepth = 0;
 		engineMaxDepth = ENGINE_TARGET_DEPTH;
@@ -416,9 +445,12 @@
 					// ever reaching the engine also resolves empty, but by
 					// then `cancelled` is already true for this closure — see
 					// nextInteractiveRequestId in stockfish.ts — so that case
-					// never reaches here.)
+					// never reaches here.) The engine is fine in that case, so
+					// this is not "unavailable"; an empty answer for a position
+					// that does have legal moves is unexpected, hence an error.
 					if (lines.length === 0) {
-						engineAvailable = false;
+						if (new Chess(fen).moves().length === 0) engineNoMoves = true;
+						else engineError = true;
 						engineLoading = false;
 						return;
 					}
@@ -430,9 +462,10 @@
 					if (engineCompleted) cacheEngineLines(fen, ENGINE_LINES, lines);
 					engineLoading = false;
 				})
-				.catch(() => {
+				.catch((err) => {
 					if (cancelled) return;
-					engineError = true;
+					if (err instanceof EngineUnavailableError) engineUnavailable = true;
+					else engineError = true;
 					engineLoading = false;
 				});
 		}, ENGINE_DEBOUNCE_MS);
@@ -770,9 +803,7 @@
 			class="tab"
 			class:active={activeTab === 'engine'}
 			onclick={() => selectTab('engine')}
-			disabled={!engineAvailable && !engineLoading}
 			type="button"
-			title={!engineAvailable && !engineLoading ? 'Stockfish engine is not available' : undefined}
 		>
 			Engine{#if activeTab === 'engine' && !engineLoading && engineCandidates.length > 0}&nbsp;({engineCandidates.length}){/if}
 		</button>
@@ -944,12 +975,15 @@
 		<!-- ── Engine tab content ────────────────────────────────────────────── -->
 	{:else if engineError}
 		<p class="empty-hint">Could not load engine suggestions.</p>
+	{:else if engineUnavailable}
+		<p class="empty-hint">Stockfish engine is not available.</p>
+		<button class="retry-btn" type="button" onclick={retryEngine}>Retry</button>
+	{:else if engineNoMoves}
+		<p class="empty-hint">No legal moves in this position.</p>
 	{:else if engineLoading && engineCandidates.length === 0}
 		<div class="loading">Analysing…</div>
 	{:else if !engineLoading && engineCandidates.length === 0}
-		<p class="empty-hint">
-			{engineAvailable ? 'No engine suggestions available.' : 'Stockfish engine is not available.'}
-		</p>
+		<p class="empty-hint">No engine suggestions available.</p>
 	{:else}
 		<div class="candidate-list" bind:this={listEl}>
 			{#each engineCandidates as c, idx (c.uci)}
@@ -1056,6 +1090,18 @@
 		color: var(--color-text-muted);
 		font-style: italic;
 		margin: 0;
+	}
+
+	.retry-btn {
+		margin-top: 6px;
+		align-self: flex-start;
+		font-size: 12px;
+		padding: 3px 10px;
+		cursor: pointer;
+		color: inherit;
+		background: transparent;
+		border: 1px solid var(--color-border);
+		border-radius: 4px;
 	}
 
 	/* ── Candidate list ──────────────────────────────────────────────────────── */
