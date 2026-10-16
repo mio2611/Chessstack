@@ -8,13 +8,19 @@
 // backlog behind it (see $lib/client/stockfish's own internal queue).
 
 import { Chess } from 'chess.js';
-import { evaluatePosition } from './stockfish';
+import { evaluatePosition, type EvalResult } from './stockfish';
 
 export interface PositionEval {
 	/** White-perspective, like the old server convention. */
 	evalCp: number | null;
-	/** White-perspective. */
+	/** White-perspective. Always 0 (never signed) for a checkmate position: see checkmated. */
 	evalMate: number | null;
+	/**
+	 * Set only for a checkmate position: the colour that is checkmated (the side
+	 * to move). "Mate in 0" carries no sign, so this is the only way to tell
+	 * which side won; use it, never the sign of evalMate, for that position.
+	 */
+	checkmated: 'w' | 'b' | null;
 	/** Not perspective-flipped — a move is a move regardless of who's to move. */
 	bestMoveUci: string | null;
 	bestMoveSan: string | null;
@@ -49,14 +55,50 @@ export interface EvaluateGameSummary {
 	cancelled: boolean;
 }
 
-/** Checkmate or stalemate: the engine has no move to search, so depth 0 is its complete answer. */
-function isTerminalPosition(fen: string): boolean {
+/**
+ * Converts a raw engine result (side-to-move perspective) to a PositionEval
+ * (White perspective). Shared by evaluateGame and by one-off evaluations in
+ * review, so the perspective flip and the checkmate/stalemate rules live in
+ * one place.
+ *
+ * A checkmate or stalemate position is reported by the engine at depth 0
+ * (nothing deeper exists to search), which is its complete answer. For a
+ * checkmate the engine's "mate 0" is relative to the side to move and flipping
+ * it cannot keep a sign, so the mated colour is recorded in `checkmated`.
+ */
+export function toPositionEval(fen: string, raw: EvalResult): PositionEval {
+	const sideToMove = fen.split(' ')[1] === 'b' ? 'b' : 'w';
+	const whiteMultiplier = sideToMove === 'w' ? 1 : -1;
+
+	let checkmate = false;
+	let stalemate = false;
 	try {
 		const chess = new Chess(fen);
-		return chess.isCheckmate() || chess.isStalemate();
+		checkmate = chess.isCheckmate();
+		stalemate = !checkmate && chess.isStalemate();
 	} catch {
-		return false;
+		// Unparseable FEN: treated as an ordinary position.
 	}
+
+	if (checkmate) {
+		return {
+			evalCp: null,
+			evalMate: 0,
+			checkmated: sideToMove,
+			bestMoveUci: null,
+			bestMoveSan: null,
+			completed: true
+		};
+	}
+
+	return {
+		evalCp: raw.evalCp != null ? raw.evalCp * whiteMultiplier : null,
+		evalMate: raw.evalMate != null ? raw.evalMate * whiteMultiplier : null,
+		checkmated: null,
+		bestMoveUci: raw.bestMoveUci,
+		bestMoveSan: raw.bestMoveSan,
+		completed: raw.completed || stalemate
+	};
 }
 
 export async function evaluateGame(
@@ -73,14 +115,7 @@ export async function evaluateGame(
 		try {
 			const raw = await evaluatePosition(fen);
 			if (isCancelled?.()) return { failures, cancelled: true };
-			const whiteMultiplier = fen.split(' ')[1] === 'w' ? 1 : -1;
-			result = {
-				evalCp: raw.evalCp != null ? raw.evalCp * whiteMultiplier : null,
-				evalMate: raw.evalMate != null ? raw.evalMate * whiteMultiplier : null,
-				bestMoveUci: raw.bestMoveUci,
-				bestMoveSan: raw.bestMoveSan,
-				completed: raw.completed || isTerminalPosition(fen)
-			};
+			result = toPositionEval(fen, raw);
 		} catch {
 			// Engine failed to load, crashed, or timed out — result stays null.
 			// Review leaves that ply uncolored; the anti-gaffe scan treats it as
