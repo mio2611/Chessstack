@@ -42,7 +42,7 @@
 		resetEngine,
 		type MultiPvLine
 	} from '$lib/client/stockfish';
-	import { evaluateGame } from '$lib/client/gameEval';
+	import { evaluateGame, toPositionEval, type PositionEval } from '$lib/client/gameEval';
 	import { scanGameForAntiGaffe } from '$lib/client/antiGaffeScan';
 
 	let { data, form }: { data: PageData; form: Record<string, unknown> | null } = $props();
@@ -397,9 +397,12 @@
 	let antiGaffePreviewFen = $state<string | null>(null);
 
 	// ── Full-game engine evaluation (CPL classification) ────────────────────────
+	// Only complete evaluations are stored: a partial one (watchdog fired before
+	// the target depth) must never colour a move or serve as a CPL baseline.
+	type StoredEval = Pick<PositionEval, 'evalCp' | 'evalMate' | 'checkmated'>;
 	// positionEvals maps position index → engine eval from white's perspective.
 	// index 0 = starting position, index N = position after ply N.
-	let positionEvals = new SvelteMap<number, { evalCp: number | null; evalMate: number | null }>();
+	let positionEvals = new SvelteMap<number, StoredEval>();
 	let evalProgress = $state<{ done: number; total: number } | null>(null);
 	// Bumped whenever the current analysis is superseded (new game loaded, or
 	// "← New game"). The client analysis loop checks this after every awaited
@@ -831,21 +834,18 @@
 				}
 			}
 
-			const playedEval = evalToWhiteCp(
-				positionEvals.get(issue.ply) ?? { evalCp: null, evalMate: null }
-			);
+			const playedStored = positionEvals.get(issue.ply);
+			const playedEval = playedStored ? evalToWhiteCp(playedStored) : null;
 
 			let correctEval: number | null = null;
 			if (correctToFen) {
 				try {
-					const result = await evaluatePosition(correctToFen);
-					const whiteMultiplier = correctToFen.split(' ')[1] === 'w' ? 1 : -1;
-					correctEval = evalToWhiteCp({
-						evalCp: result.evalCp != null ? result.evalCp * whiteMultiplier : null,
-						evalMate: result.evalMate != null ? result.evalMate * whiteMultiplier : null
-					});
+					const result = toPositionEval(correctToFen, await evaluatePosition(correctToFen));
+					// A partial evaluation (watchdog fired first) is not a usable
+					// baseline: leave correctEval null. A checkmate counts as complete.
+					if (result.completed) correctEval = evalToWhiteCp(result);
 				} catch {
-					/* ignore — watchdog timeout or similar, leave correctEval null */
+					/* ignore — engine unavailable, leave correctEval null */
 				}
 			}
 
@@ -878,8 +878,14 @@
 	// Convert an eval object (already from white's perspective) to a single
 	// centipawn number. Mate scores become large centipawn equivalents so CPL
 	// arithmetic works uniformly.
-	function evalToWhiteCp(ev: { evalCp: number | null; evalMate: number | null }): number | null {
+	function evalToWhiteCp(ev: StoredEval): number | null {
 		if (ev.evalCp != null) return ev.evalCp;
+		// "Mate in 0" has no sign: the mated colour says who won.
+		if (ev.evalMate === 0) {
+			if (ev.checkmated === 'w') return -10000;
+			if (ev.checkmated === 'b') return 10000;
+			return null;
+		}
 		if (ev.evalMate != null) {
 			const sign = ev.evalMate > 0 ? 1 : -1;
 			return sign * (10000 - Math.abs(ev.evalMate) * 10);
@@ -893,6 +899,8 @@
 		const evalBefore = positionEvals.get(ply - 1);
 		const evalAfter = positionEvals.get(ply);
 		if (!evalBefore || !evalAfter) return null;
+		// The move itself delivered checkmate: nothing can be lost.
+		if (evalAfter.evalMate === 0) return 0;
 		const cpBefore = evalToWhiteCp(evalBefore);
 		const cpAfter = evalToWhiteCp(evalAfter);
 		if (cpBefore === null || cpAfter === null) return null;
@@ -920,7 +928,9 @@
 	}
 
 	// Format a position eval for the inline badge (from the player's perspective).
-	function formatPositionEval(ev: { evalCp: number | null; evalMate: number | null }): string {
+	function formatPositionEval(ev: StoredEval): string {
+		// No badge on a checkmate: the move's own "#" already says it.
+		if (ev.evalMate === 0) return '';
 		if (ev.evalMate != null) {
 			const playerMate = analysedPlayerColor === 'BLACK' ? -ev.evalMate : ev.evalMate;
 			return playerMate > 0 ? `M${Math.abs(playerMate)}` : `-M${Math.abs(playerMate)}`;
@@ -952,8 +962,12 @@
 				evalProgress = p;
 			},
 			onResult: (ply, _fen, result) => {
-				if (result) {
-					positionEvals.set(ply, { evalCp: result.evalCp, evalMate: result.evalMate });
+				if (result?.completed) {
+					positionEvals.set(ply, {
+						evalCp: result.evalCp,
+						evalMate: result.evalMate,
+						checkmated: result.checkmated
+					});
 				}
 			}
 		});
@@ -2029,6 +2043,7 @@
 						(analysedPlayerColor === 'WHITE' && ply % 2 === 1) ||
 						(analysedPlayerColor === 'BLACK' && ply % 2 === 0)}
 					{@const plyEval = isUserPly ? positionEvals.get(ply) : null}
+					{@const evalBadge = plyEval ? formatPositionEval(plyEval) : ''}
 					{#if i % 2 === 0}
 						<span class="move-num">{Math.floor(i / 2) + 1}.</span>
 					{/if}
@@ -2039,8 +2054,7 @@
 						onclick={() => {
 							currentPlyIdx = ply;
 						}}
-						>{san}{#if plyEval}<span class="move-eval">{formatPositionEval(plyEval)}</span
-							>{/if}</button
+						>{san}{#if evalBadge}<span class="move-eval">{evalBadge}</span>{/if}</button
 					>
 				{/each}
 			</div>
