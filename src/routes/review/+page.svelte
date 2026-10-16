@@ -36,8 +36,10 @@
 	import { Chess } from 'chess.js';
 	import { STARTING_FEN, fenKey } from '$lib/fen';
 	import {
+		EngineUnavailableError,
 		evaluatePosition,
 		evaluatePositionMultiPv,
+		resetEngine,
 		type MultiPvLine
 	} from '$lib/client/stockfish';
 	import { evaluateGame } from '$lib/client/gameEval';
@@ -372,6 +374,10 @@
 	let antiGaffeScanProgress = $state<{ done: number; total: number } | null>(null);
 	let antiGaffeScanError = $state<string | null>(null);
 	let antiGaffeScanRunId = 0;
+	// Synchronous "a scan is running" guard, set before the first await of
+	// runAntiGaffeScan (the button only disappears once the progress is set,
+	// and a double click in between would create a second reviewed game).
+	let antiGaffeScanActive = false;
 	let antiGaffeActionLoading = new SvelteMap<number, boolean>();
 	// candidateId → the existing card's move, when accept returned a 409.
 	let antiGaffeConflicts = new SvelteMap<number, string>();
@@ -525,6 +531,7 @@
 				deviationMastersError.clear();
 				deviationMastersExpanded.clear();
 				positionEvals.clear();
+				cancelAntiGaffeScan();
 				evalRunId++;
 				evalProgress = null;
 				hoveredFen = null;
@@ -710,6 +717,10 @@
 			antiGaffeMultiPvCache.set(candidate.id, lines);
 			if (antiGaffeMultiPvCandidateId !== candidate.id) return; // superseded by a later click
 			antiGaffeMultiPvLines = lines;
+		} catch (err) {
+			// Engine unavailable: nothing was cached (the call threw), the
+			// suggestions simply stay empty. Anything else is a bug.
+			if (!(err instanceof EngineUnavailableError)) throw err;
 		} finally {
 			if (antiGaffeMultiPvCandidateId === candidate.id) antiGaffeMultiPvLoading = false;
 		}
@@ -929,6 +940,9 @@
 	// engine call, so at most one already-in-flight position is "wasted",
 	// never a whole backlog.
 	async function runClientAnalysis(gameAnalysis: GameAnalysis): Promise<void> {
+		// A click on "Analyser cette partie" is a user action: if the engine
+		// had failed, this is the retry (no-op when it is healthy).
+		resetEngine();
 		const myRunId = ++evalRunId;
 		evalProgress = { done: 0, total: gameAnalysis.fenHistory.length };
 
@@ -1482,39 +1496,67 @@
 	// deviation analysis never cancel each other (they just queue on the
 	// same underlying client Stockfish worker).
 	async function runAntiGaffeScan(): Promise<void> {
-		if (!analysis) return;
+		if (!analysis || antiGaffeScanActive) return;
+		antiGaffeScanActive = true;
 		const myRunId = ++antiGaffeScanRunId;
 		antiGaffeScanError = null;
-
-		const ref = await ensureReviewedGameId();
-		if (!ref || myRunId !== antiGaffeScanRunId) return;
-
+		// Shown at once, so the button is gone while the reviewed game is
+		// being created below.
 		antiGaffeScanProgress = { done: 0, total: analysis.fenHistory.length };
 
-		const outcome = await scanGameForAntiGaffe({
-			gameSource: ref.gameSource,
-			gameId: ref.gameId,
-			fenHistory: analysis.fenHistory,
-			sanHistory: analysis.sanHistory,
-			playerColor: analysedPlayerColor,
-			isCancelled: () => myRunId !== antiGaffeScanRunId,
-			onProgress: (p) => {
-				antiGaffeScanProgress = p;
-			},
-			onCandidateFound: () => {
-				// Refresh live as candidates are found rather than waiting for
-				// the whole scan (which can run for many minutes) to finish.
-				loadAntiGaffeCandidates();
-			}
-		});
+		try {
+			const ref = await ensureReviewedGameId();
+			if (!ref || myRunId !== antiGaffeScanRunId) return;
 
-		if (myRunId !== antiGaffeScanRunId) return;
-		antiGaffeScanProgress = null;
-		if (outcome === 'failed') {
-			antiGaffeScanError =
-				'Scan interrupted: the engine failed on at least one position. This game is not marked as scanned. Candidates already found were kept.';
+			// Starting a scan is a user action: if the engine had failed, this
+			// is the retry (no-op when it is healthy).
+			resetEngine();
+
+			const outcome = await scanGameForAntiGaffe({
+				gameSource: ref.gameSource,
+				gameId: ref.gameId,
+				fenHistory: analysis.fenHistory,
+				sanHistory: analysis.sanHistory,
+				playerColor: analysedPlayerColor,
+				isCancelled: () => myRunId !== antiGaffeScanRunId,
+				onProgress: (p) => {
+					antiGaffeScanProgress = p;
+				},
+				onCandidateFound: () => {
+					// Refresh live as candidates are found rather than waiting for
+					// the whole scan (which can run for many minutes) to finish.
+					loadAntiGaffeCandidates();
+				}
+			});
+
+			if (myRunId !== antiGaffeScanRunId) return;
+			antiGaffeScanProgress = null;
+			if (outcome === 'failed') {
+				antiGaffeScanError =
+					'Scan interrupted: the engine failed on at least one position. This game is not marked as scanned. Candidates already found were kept.';
+			} else if (outcome === 'save-failed') {
+				antiGaffeScanError =
+					'Scan finished, but some results could not be saved. This game is not marked as scanned; you can run the scan again.';
+			}
+			await loadAntiGaffeCandidates();
+		} finally {
+			// Only the current run may clear the shared state: a run cancelled
+			// by cancelAntiGaffeScan must not clobber a newer one.
+			if (myRunId === antiGaffeScanRunId) {
+				antiGaffeScanActive = false;
+				antiGaffeScanProgress = null;
+			}
 		}
-		await loadAntiGaffeCandidates();
+	}
+
+	// Abandons a running scan (the game being reviewed is going away): it
+	// stops at its next position and its UI state is cleared at once, so the
+	// panel of the next game neither shows its progress nor stays locked.
+	function cancelAntiGaffeScan(): void {
+		antiGaffeScanRunId++;
+		antiGaffeScanActive = false;
+		antiGaffeScanProgress = null;
+		antiGaffeScanError = null;
 	}
 
 	async function acceptAntiGaffeCandidate(
@@ -1600,6 +1642,7 @@
 
 	// Go back to the input state to review another game.
 	function reviewAnother(): void {
+		cancelAntiGaffeScan();
 		evalRunId++;
 		evalProgress = null;
 		positionEvals.clear();

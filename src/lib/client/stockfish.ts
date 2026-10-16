@@ -14,6 +14,14 @@
 // WATCHDOG_MS without emitting a single depth-progress line, the search is
 // treated as failed (engine hang/crash) rather than waited on forever.
 //
+// Engine health is an explicit state (idle → loading → ready, or failed).
+// Anything that makes the engine unusable (script/wasm that never loads,
+// a handshake or a search that goes silent, a worker crash) moves it to
+// `failed` and surfaces as an EngineUnavailableError. `failed` is permanent
+// until resetEngine(): the worker may still emit late lines (a stale
+// "bestmove") that would corrupt the next search, so it is never reused.
+// Cancelling a search (UCI "stop" + epochs) never changes the health state.
+//
 // Every search sends ucinewgame first — see resetForNewSearch's comment.
 // Without it, the hash table carries over between unrelated positions
 // evaluated in the same session, and a nominally identical depth-20 search
@@ -29,6 +37,7 @@
 // whose turn it was.
 
 import { Chess } from 'chess.js';
+import { engineStatus } from './engineStatus.svelte';
 
 export const TARGET_DEPTH = 20;
 
@@ -36,7 +45,33 @@ export const TARGET_DEPTH = 20;
 // or crashed engine, not a legitimately slow search.
 const WATCHDOG_MS = 3 * 60 * 1000;
 
+// Silence during the load handshake (uci / isready) ⇒ the script or the
+// wasm never came up. Much shorter than WATCHDOG_MS: nothing legitimate
+// takes this long before the first line, and it is the only detection path
+// for a blocked .wasm, which produces silence rather than a worker 'error'.
+const HANDSHAKE_TIMEOUT_MS = 30 * 1000;
+
 const ENGINE_URL = '/engine/stockfish-19-lite-single.js';
+
+export type EngineUnavailableReason = 'load' | 'timeout' | 'crashed';
+
+/**
+ * The engine cannot be used. `reason`:
+ *  - 'load': it never came up (worker script error, or silence before the
+ *    first readyok);
+ *  - 'timeout': it went silent after having been ready (WATCHDOG_MS);
+ *  - 'crashed': the worker raised an error after having been ready.
+ * Once raised the engine stays failed until resetEngine().
+ */
+export class EngineUnavailableError extends Error {
+	readonly reason: EngineUnavailableReason;
+
+	constructor(reason: EngineUnavailableReason) {
+		super(`Stockfish engine is not available (${reason})`);
+		this.name = 'EngineUnavailableError';
+		this.reason = reason;
+	}
+}
 
 export interface EvalProgress {
 	depth: number;
@@ -59,8 +94,103 @@ export interface EvalResult {
 	interrupted?: boolean;
 }
 
+type EngineState = 'idle' | 'loading' | 'ready' | 'failed';
+
 let worker: Worker | null = null;
 let readyPromise: Promise<void> | null = null;
+let engineState: EngineState = 'idle';
+let failure: EngineUnavailableError | null = null;
+
+// Rejectors of the waitFor calls currently waiting on `worker`, so that a
+// failure (crash, silence) rejects every in-flight call at once.
+const pendingRejects = new Set<(err: EngineUnavailableError) => void>();
+
+// Read through a function so TypeScript does not keep a stale narrowing of
+// the module-level variable across an await.
+function currentState(): EngineState {
+	return engineState;
+}
+
+// Single place where the health state changes: keeps the reactive mirror
+// read by the UI (engineStatus) in step with the internal state.
+function setEngineState(next: EngineState, reason: EngineUnavailableReason | null = null): void {
+	engineState = next;
+	engineStatus.state = next;
+	engineStatus.reason = reason;
+}
+
+function markFailed(w: Worker, err: EngineUnavailableError): void {
+	if (w !== worker || engineState === 'failed') return;
+	failure = err;
+	setEngineState('failed', err.reason);
+	const rejects = [...pendingRejects];
+	pendingRejects.clear();
+	for (const reject of rejects) reject(err);
+}
+
+function startLoading(): void {
+	failure = null;
+	setEngineState('loading');
+	let w: Worker;
+	try {
+		w = new Worker(ENGINE_URL);
+	} catch {
+		// Some browsers throw synchronously (blocked or invalid script URL).
+		worker = null;
+		readyPromise = null;
+		failure = new EngineUnavailableError('load');
+		setEngineState('failed', 'load');
+		return;
+	}
+	worker = w;
+	// Permanent listener: a crash while no call is waiting (between two
+	// searches) must flip the state too, not just one that happens during a
+	// waitFor.
+	w.addEventListener('error', () => {
+		markFailed(w, new EngineUnavailableError(currentState() === 'loading' ? 'load' : 'crashed'));
+	});
+	readyPromise = ensureReady(w);
+	// The callers that await it receive the rejection; this only prevents an
+	// unhandled-rejection report when nobody is awaiting at that moment.
+	readyPromise.catch(() => undefined);
+}
+
+/**
+ * Returns the ready worker, starting it if needed. Throws
+ * EngineUnavailableError if the engine is (or becomes) failed.
+ */
+async function ensureEngine(): Promise<Worker> {
+	if (currentState() === 'idle') startLoading();
+	if (currentState() === 'failed') throw failure ?? new EngineUnavailableError('load');
+	await readyPromise;
+	const w = worker;
+	if (currentState() !== 'ready' || !w) {
+		throw failure ?? new EngineUnavailableError('crashed');
+	}
+	return w;
+}
+
+/**
+ * Drops a failed engine so the next call starts a fresh worker. The only
+ * place a worker is ever terminated, and only from `failed`: a failed worker
+ * may be hung or still searching, and keeping it would leak a busy WASM
+ * worker. No-op in any other state (cancelling a search is never a reason to
+ * reset).
+ *
+ * Only ever called from a user-initiated action (a retry button, starting a
+ * scan or an analysis), never automatically: a background loop calling it
+ * would restart a broken engine, and wait out a handshake timeout, for every
+ * position.
+ */
+export function resetEngine(): void {
+	if (currentState() !== 'failed') return;
+	worker?.terminate();
+	worker = null;
+	readyPromise = null;
+	failure = null;
+	pendingRejects.clear();
+	setEngineState('idle');
+}
 
 // Serialises calls: the engine can only run one search at a time. Each new
 // call waits for the previous one to settle (success or failure) before
@@ -89,7 +219,7 @@ let activeInteractiveRequestId: number | null = null;
 function nextInteractiveRequestId(): number {
 	const id = ++latestInteractiveRequestId;
 	if (activeInteractiveRequestId !== null && activeInteractiveRequestId !== id) {
-		getWorker().postMessage('stop');
+		worker?.postMessage('stop');
 	}
 	return id;
 }
@@ -119,7 +249,7 @@ export function stopBackgroundSearch(): void {
 	backgroundEpoch++;
 	if (!backgroundRunning) return;
 	backgroundStopRequested = true;
-	getWorker().postMessage('stop');
+	worker?.postMessage('stop');
 }
 
 // Number of foreground calls (interactive or batch) issued but not yet
@@ -171,27 +301,37 @@ export function cancelInteractiveSearches(): void {
 	nextInteractiveRequestId();
 }
 
-function getWorker(): Worker {
-	if (!worker) {
-		worker = new Worker(ENGINE_URL);
-	}
-	return worker;
+interface WaitOptions {
+	timeoutMs: number;
+	/** Reason carried by the EngineUnavailableError raised on silence. */
+	silenceReason: EngineUnavailableReason;
 }
+
+const SEARCH_WAIT: WaitOptions = { timeoutMs: WATCHDOG_MS, silenceReason: 'timeout' };
+const HANDSHAKE_WAIT: WaitOptions = { timeoutMs: HANDSHAKE_TIMEOUT_MS, silenceReason: 'load' };
 
 /**
  * Resolve when a line matching `isMatch` arrives. Calls `onLine` for every
- * line seen in the meantime (used to track "info depth" progress). Rejects
- * with a `stockfish-watchdog-timeout` error if WATCHDOG_MS elapses without
- * ANY line arriving — not just without a matching one — so a genuinely
- * slow-but-alive search is never mistaken for a hang.
+ * line seen in the meantime (used to track "info depth" progress). If
+ * `timeoutMs` elapses without ANY line arriving — not just without a
+ * matching one, so a genuinely slow-but-alive search is never mistaken for a
+ * hang — the engine is marked failed and this rejects with an
+ * EngineUnavailableError. Also rejects if the engine fails while waiting
+ * (worker 'error'), through pendingRejects.
  */
 function waitFor(
 	w: Worker,
 	isMatch: (line: string) => boolean,
-	onLine?: (line: string) => void
+	onLine: ((line: string) => void) | undefined,
+	{ timeoutMs, silenceReason }: WaitOptions
 ): Promise<string> {
 	return new Promise((resolve, reject) => {
 		let watchdog: ReturnType<typeof setTimeout>;
+
+		function fail(err: EngineUnavailableError) {
+			cleanup();
+			reject(err);
+		}
 
 		function handleMessage(e: MessageEvent<string>) {
 			const line = e.data;
@@ -206,16 +346,19 @@ function waitFor(
 		function resetWatchdog() {
 			clearTimeout(watchdog);
 			watchdog = setTimeout(() => {
-				cleanup();
-				reject(new Error('stockfish-watchdog-timeout'));
-			}, WATCHDOG_MS);
+				const err = new EngineUnavailableError(silenceReason);
+				markFailed(w, err);
+				fail(err);
+			}, timeoutMs);
 		}
 
 		function cleanup() {
 			clearTimeout(watchdog);
 			w.removeEventListener('message', handleMessage);
+			pendingRejects.delete(fail);
 		}
 
+		pendingRejects.add(fail);
 		w.addEventListener('message', handleMessage);
 		resetWatchdog();
 	});
@@ -223,9 +366,10 @@ function waitFor(
 
 async function ensureReady(w: Worker): Promise<void> {
 	w.postMessage('uci');
-	await waitFor(w, (l) => l === 'uciok');
+	await waitFor(w, (l) => l === 'uciok', undefined, HANDSHAKE_WAIT);
 	w.postMessage('isready');
-	await waitFor(w, (l) => l === 'readyok');
+	await waitFor(w, (l) => l === 'readyok', undefined, HANDSHAKE_WAIT);
+	if (w === worker && currentState() === 'loading') setEngineState('ready');
 }
 
 // Confirmed by direct testing against native Stockfish: without ucinewgame,
@@ -242,7 +386,7 @@ async function resetForNewSearch(w: Worker, multiPv: number): Promise<void> {
 	w.postMessage('ucinewgame');
 	w.postMessage(`setoption name MultiPV value ${multiPv}`);
 	w.postMessage('isready');
-	await waitFor(w, (l) => l === 'readyok');
+	await waitFor(w, (l) => l === 'readyok', undefined, SEARCH_WAIT);
 }
 
 const INFO_DEPTH_RE = /^info depth (\d+)/;
@@ -270,10 +414,13 @@ function uciToSan(fen: string, uciMove: string): string | null {
  * one at a time on a single persistent worker — concurrent calls queue up
  * rather than fighting over the engine.
  *
- * On a watchdog timeout the engine is sent "stop" (so it does not keep
- * burning CPU on an abandoned search) and the result comes back with
- * completed: false and whatever depth/eval had already been reached, if
- * any.
+ * If the engine goes silent DURING the search (WATCHDOG_MS), it is sent
+ * "stop" (so it does not keep burning CPU on an abandoned search), marked
+ * failed, and the result comes back with completed: false and whatever
+ * depth/eval had already been reached, if any. Every other way the engine
+ * can be unusable (it never loaded, it went silent before the search
+ * started, it crashed, or it is already failed) throws an
+ * EngineUnavailableError instead.
  */
 export function evaluatePosition(
 	fen: string,
@@ -322,9 +469,7 @@ function evaluatePositionInternal(
 	const run = async (): Promise<EvalResult> => {
 		if (shouldAbort()) return interruptedResult;
 
-		const w = getWorker();
-		if (!readyPromise) readyPromise = ensureReady(w);
-		await readyPromise;
+		const w = await ensureEngine();
 
 		if (background) {
 			// A stop requested while this call was queued or the engine was
@@ -338,6 +483,9 @@ function evaluatePositionInternal(
 		let evalCp: number | null = null;
 		let evalMate: number | null = null;
 		let depthReached = 0;
+		// True once `go` has been sent: only silence from then on is a
+		// "search" timeout (soft completed: false result).
+		let searching = false;
 
 		// See resetForNewSearch's comment: without this, the hash table
 		// carries over stale entries from whatever was searched before,
@@ -347,6 +495,7 @@ function evaluatePositionInternal(
 			await resetForNewSearch(w, 1);
 			w.postMessage(`position fen ${fen}`);
 			w.postMessage(`go depth ${TARGET_DEPTH}`);
+			searching = true;
 			// A stop requested while we were still in resetForNewSearch was
 			// ignored by the engine (nothing was searching yet): repeat it.
 			if (background && (backgroundStopRequested || shouldAbort())) {
@@ -373,7 +522,8 @@ function evaluatePositionInternal(
 						evalMate = parseInt(mateMatch[1], 10);
 						evalCp = null;
 					}
-				}
+				},
+				SEARCH_WAIT
 			);
 
 			const bestMoveUci = BESTMOVE_RE.exec(bestmoveLine)?.[1] ?? null;
@@ -389,7 +539,7 @@ function evaluatePositionInternal(
 				...(background ? { interrupted: !completed && backgroundStopRequested } : {})
 			};
 		} catch (err) {
-			if (err instanceof Error && err.message === 'stockfish-watchdog-timeout') {
+			if (searching && err instanceof EngineUnavailableError && err.reason === 'timeout') {
 				// Stop the current search so it doesn't keep burning CPU on a
 				// position we've given up waiting on.
 				w.postMessage('stop');
@@ -437,8 +587,12 @@ const PV_MOVE_RE = /\bpv (\S+)/;
  * search is slower per position and the scan already runs long enough).
  *
  * Same depth/watchdog/queue behaviour as evaluatePosition — see its own
- * comments. Returns fewer than `lines` entries if the position has fewer
- * legal moves than requested, or none at all on checkmate/stalemate.
+ * comments — except that it has no way to flag an incomplete result: when
+ * the engine is unavailable, including a silence during the search, it
+ * throws an EngineUnavailableError rather than return partial lines that a
+ * caller could cache as complete. Returns fewer than `lines` entries if
+ * the position has fewer legal moves than requested, or none at all on
+ * checkmate/stalemate.
  *
  * Pass `interactive: true` for callers where a newer call can supersede an
  * older, still-running one — e.g. the Build/Review engine tab, where the
@@ -462,9 +616,7 @@ export function evaluatePositionMultiPv(
 	const run = async (): Promise<MultiPvLine[]> => {
 		if (requestId !== null && isInteractiveSuperseded(requestId)) return [];
 
-		const w = getWorker();
-		if (!readyPromise) readyPromise = ensureReady(w);
-		await readyPromise;
+		const w = await ensureEngine();
 
 		// slot (1-indexed, per UCI's "multipv N") → latest line seen for it.
 		const slots = new Map<number, MultiPvLine>();
@@ -499,18 +651,17 @@ export function evaluatePositionMultiPv(
 						moveUci,
 						moveSan: uciToSan(fen, moveUci)
 					});
-				}
+				},
+				SEARCH_WAIT
 			);
 
 			return Array.from(slots.keys())
 				.sort((a, b) => a - b)
 				.map((slot) => slots.get(slot)!);
 		} catch (err) {
-			if (err instanceof Error && err.message === 'stockfish-watchdog-timeout') {
+			if (err instanceof EngineUnavailableError && err.reason === 'timeout') {
+				// Do not keep burning CPU on an abandoned search.
 				w.postMessage('stop');
-				return Array.from(slots.keys())
-					.sort((a, b) => a - b)
-					.map((slot) => slots.get(slot)!);
 			}
 			throw err;
 		} finally {
