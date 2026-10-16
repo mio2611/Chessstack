@@ -37,6 +37,7 @@
 // whose turn it was.
 
 import { Chess } from 'chess.js';
+import { engineStatus } from './engineStatus.svelte';
 
 export const TARGET_DEPTH = 20;
 
@@ -110,18 +111,26 @@ function currentState(): EngineState {
 	return engineState;
 }
 
+// Single place where the health state changes: keeps the reactive mirror
+// read by the UI (engineStatus) in step with the internal state.
+function setEngineState(next: EngineState, reason: EngineUnavailableReason | null = null): void {
+	engineState = next;
+	engineStatus.state = next;
+	engineStatus.reason = reason;
+}
+
 function markFailed(w: Worker, err: EngineUnavailableError): void {
 	if (w !== worker || engineState === 'failed') return;
-	engineState = 'failed';
 	failure = err;
+	setEngineState('failed', err.reason);
 	const rejects = [...pendingRejects];
 	pendingRejects.clear();
 	for (const reject of rejects) reject(err);
 }
 
 function startLoading(): void {
-	engineState = 'loading';
 	failure = null;
+	setEngineState('loading');
 	let w: Worker;
 	try {
 		w = new Worker(ENGINE_URL);
@@ -129,8 +138,8 @@ function startLoading(): void {
 		// Some browsers throw synchronously (blocked or invalid script URL).
 		worker = null;
 		readyPromise = null;
-		engineState = 'failed';
 		failure = new EngineUnavailableError('load');
+		setEngineState('failed', 'load');
 		return;
 	}
 	worker = w;
@@ -167,6 +176,11 @@ async function ensureEngine(): Promise<Worker> {
  * may be hung or still searching, and keeping it would leak a busy WASM
  * worker. No-op in any other state (cancelling a search is never a reason to
  * reset).
+ *
+ * Only ever called from a user-initiated action (a retry button, starting a
+ * scan or an analysis), never automatically: a background loop calling it
+ * would restart a broken engine, and wait out a handshake timeout, for every
+ * position.
  */
 export function resetEngine(): void {
 	if (currentState() !== 'failed') return;
@@ -175,7 +189,7 @@ export function resetEngine(): void {
 	readyPromise = null;
 	failure = null;
 	pendingRejects.clear();
-	engineState = 'idle';
+	setEngineState('idle');
 }
 
 // Serialises calls: the engine can only run one search at a time. Each new
@@ -355,7 +369,7 @@ async function ensureReady(w: Worker): Promise<void> {
 	await waitFor(w, (l) => l === 'uciok', undefined, HANDSHAKE_WAIT);
 	w.postMessage('isready');
 	await waitFor(w, (l) => l === 'readyok', undefined, HANDSHAKE_WAIT);
-	if (w === worker && currentState() === 'loading') engineState = 'ready';
+	if (w === worker && currentState() === 'loading') setEngineState('ready');
 }
 
 // Confirmed by direct testing against native Stockfish: without ucinewgame,
