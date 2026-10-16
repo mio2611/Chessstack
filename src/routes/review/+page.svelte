@@ -1518,6 +1518,9 @@
 		if (outcome === 'failed') {
 			antiGaffeScanError =
 				'Scan interrupted: the engine failed on at least one position. This game is not marked as scanned. Candidates already found were kept.';
+		} else if (outcome === 'save-failed') {
+			antiGaffeScanError =
+				'Scan finished, but some results could not be saved. This game is not marked as scanned; you can run the scan again.';
 		}
 		await loadAntiGaffeCandidates();
 	}
