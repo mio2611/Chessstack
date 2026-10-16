@@ -36,6 +36,7 @@
 	import { Chess } from 'chess.js';
 	import { STARTING_FEN, fenKey } from '$lib/fen';
 	import {
+		EngineUnavailableError,
 		evaluatePosition,
 		evaluatePositionMultiPv,
 		type MultiPvLine
@@ -710,6 +711,10 @@
 			antiGaffeMultiPvCache.set(candidate.id, lines);
 			if (antiGaffeMultiPvCandidateId !== candidate.id) return; // superseded by a later click
 			antiGaffeMultiPvLines = lines;
+		} catch (err) {
+			// Engine unavailable: nothing was cached (the call threw), the
+			// suggestions simply stay empty. Anything else is a bug.
+			if (!(err instanceof EngineUnavailableError)) throw err;
 		} finally {
 			if (antiGaffeMultiPvCandidateId === candidate.id) antiGaffeMultiPvLoading = false;
 		}
