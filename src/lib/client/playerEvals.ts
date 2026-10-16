@@ -19,7 +19,13 @@
 
 import { Chess } from 'chess.js';
 import { fenKey } from '$lib/fen';
-import { evaluatePositionBackground, whenInteractiveIdle, stopBackgroundSearch } from './stockfish';
+import {
+	EngineUnavailableError,
+	evaluatePositionBackground,
+	whenInteractiveIdle,
+	stopBackgroundSearch,
+	type EvalResult
+} from './stockfish';
 
 /** Upper bound on evaluated (and therefore colored) moves per position. */
 export const MAX_EVALUATED_MOVES = 5;
@@ -159,7 +165,8 @@ function makeTarget(chess: Chess): Target {
  * Eval of one position in WHITE's perspective: from the session cache, else
  * by a background search (retried from scratch after each preemption by the
  * Engine tab), then shared with the server cache. Resolves to null if the
- * work was cancelled or the search failed (watchdog).
+ * work was cancelled or the search failed (watchdog, or the engine is
+ * unavailable).
  */
 async function resolveEval(target: Target, isCancelled: () => boolean): Promise<ChildEval | null> {
 	// Checkmate / stalemate: known without the engine, and deliberately
@@ -173,7 +180,15 @@ async function resolveEval(target: Target, isCancelled: () => boolean): Promise<
 		await whenInteractiveIdle();
 		if (isCancelled()) return null;
 
-		const result = await evaluatePositionBackground(target.fen, isCancelled);
+		let result: EvalResult;
+		try {
+			result = await evaluatePositionBackground(target.fen, isCancelled);
+		} catch (err) {
+			// Engine unavailable (failed to load, crashed, or went silent):
+			// give up on this position only. Anything else is a bug.
+			if (err instanceof EngineUnavailableError) return null;
+			throw err;
+		}
 		if (result.completed) {
 			const raw: ChildEval = { evalCp: result.evalCp, evalMate: result.evalMate };
 			const white = toWhite(raw, target.whiteMultiplier);
