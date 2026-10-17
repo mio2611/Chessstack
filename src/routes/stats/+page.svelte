@@ -3,6 +3,7 @@
 	import { SvelteDate } from 'svelte/reactivity';
 	import RetentionChart from '$lib/components/stats/RetentionChart.svelte';
 	import MaturedChart from '$lib/components/stats/MaturedChart.svelte';
+	import SnapshotChart from '$lib/components/stats/SnapshotChart.svelte';
 
 	let { data }: { data: PageData } = $props();
 
@@ -203,6 +204,32 @@
 			<!-- Net matured cards -->
 			<div class="widget widget-wide">
 				<MaturedChart daily={data.dailyStats} today={data.today} />
+			</div>
+
+			<!-- Total cards over time -->
+			<div class="widget widget-wide">
+				<SnapshotChart
+					points={data.cardSnapshots}
+					today={data.today}
+					field="total"
+					title="Total Cards"
+					note="Cards of this repertoire that are in scope, one snapshot per day you use the app. Days without a visit keep the previous value."
+					color="var(--color-accent)"
+					name="total-cards-period"
+				/>
+			</div>
+
+			<!-- Struggling cards over time -->
+			<div class="widget widget-wide">
+				<SnapshotChart
+					points={data.cardSnapshots}
+					today={data.today}
+					field="struggling"
+					title="Struggling Cards"
+					note="Cards with the red dot on the Build graph: 3 or more lapses and not mature (scheduled beyond 21 days). Days without a visit keep the previous value."
+					color="var(--color-danger)"
+					name="struggling-cards-period"
+				/>
 			</div>
 
 			<!-- Per-Opening Stats -->

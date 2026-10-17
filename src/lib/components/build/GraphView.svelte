@@ -22,6 +22,7 @@
 	import { untrack } from 'svelte';
 	import type { RepertoireMove } from './buildState.svelte';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
+	import { isStrugglingCard } from '$lib/stats-aggregation';
 
 	// Inlined locally under a distinct name rather than imported from
 	// $lib/fen: importing the shared fenKey here (or even a locally-defined
@@ -124,7 +125,6 @@
 	const currentFenKey = $derived(graphFenKey(currentFen));
 
 	const MATURE_SCHEDULED_DAYS = 21; // matches the app's existing "mature" convention
-	const STRUGGLE_LAPSE_THRESHOLD = 3;
 
 	function cardStateKey(fromKey: string, san: string): string {
 		return `${fromKey}|${san}`;
@@ -172,10 +172,10 @@
 		return !!cs && cs.state === 2 && (cs.scheduledDays ?? 0) > MATURE_SCHEDULED_DAYS;
 	}
 
+	// Shared with the /stats snapshots so the red dots and the chart never drift.
 	function isStruggling(node: LaidOutNode): boolean {
 		const cs = getCardState(node);
-		if (!cs) return false;
-		return (cs.lapses ?? 0) >= STRUGGLE_LAPSE_THRESHOLD && !isMature(node);
+		return !!cs && isStrugglingCard(cs);
 	}
 
 	// ── Mastery zones ───────────────────────────────────────────────────────
