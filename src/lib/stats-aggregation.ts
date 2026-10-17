@@ -14,7 +14,10 @@ import { periodStartDay, makeDayFormatter } from './local-days';
 export const MATURE_THRESHOLD_DAYS = 21;
 
 /** True when a card in `state` with a scheduled interval of `scheduledDays` is mature. */
-export function isMature(state: number, scheduledDays: number | null | undefined): boolean {
+export function isMature(
+	state: number | null | undefined,
+	scheduledDays: number | null | undefined
+): boolean {
 	return state === State.Review && (scheduledDays ?? 0) >= MATURE_THRESHOLD_DAYS;
 }
 
@@ -240,4 +243,86 @@ export function alignZero(
 		return [-fz * total, (1 - fz) * total];
 	};
 	return { a: widen(a), b: widen(b) };
+}
+
+// ─── Struggling cards (the red dot on the Build graph) ───────────────────────
+
+/** A card with at least this many lapses that is not mature gets the red dot. */
+export const STRUGGLE_LAPSE_THRESHOLD = 3;
+
+/**
+ * True when the Build graph shows the red dot on a card. Single source of truth
+ * for GraphView and the /stats snapshots, so the dots and the chart cannot drift.
+ * Maturity is isMature above (Anki's convention, 21 days or more) everywhere.
+ */
+export function isStrugglingCard(card: {
+	state: number | null;
+	lapses: number | null;
+	scheduledDays: number | null;
+}): boolean {
+	return (
+		(card.lapses ?? 0) >= STRUGGLE_LAPSE_THRESHOLD &&
+		!isMature(card.state ?? State.New, card.scheduledDays)
+	);
+}
+
+// ─── Card snapshots (total and struggling cards over time) ───────────────────
+
+/** One stored snapshot: the counts of one local day. */
+export interface CardSnapshotPoint {
+	day: string; // YYYY-MM-DD in the viewer's time zone
+	total: number;
+	struggling: number;
+}
+
+export interface SnapshotBucket {
+	start: string; // first day of the bucket (the day itself, or the Monday of the week)
+	total: number; // value at the end of the bucket
+	struggling: number;
+}
+
+export interface SnapshotSeries {
+	granularity: Granularity;
+	buckets: SnapshotBucket[];
+	firstDay: string;
+}
+
+/**
+ * Snapshot values per bucket for a period ending on `today`. A snapshot is a
+ * level, not a flow: days without a snapshot (app not opened) carry the last
+ * known value forward, and a week shows its last value. The axis never starts
+ * before the first snapshot. Returns null when there is none.
+ */
+export function buildSnapshotSeries(
+	points: CardSnapshotPoint[],
+	period: Period,
+	today: string
+): SnapshotSeries | null {
+	const sorted = points
+		.filter((p) => p.day <= today)
+		.sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0));
+	if (sorted.length === 0) return null;
+
+	let firstDay = sorted[0].day;
+	if (period !== 'all') {
+		const windowStart = addDays(today, -(PERIOD_DAYS[period] - 1));
+		if (windowStart > firstDay) firstDay = windowStart;
+	}
+
+	const granularity: Granularity = period === '1m' ? 'day' : 'week';
+	const keyOf = (day: string) => (granularity === 'day' ? day : periodStartDay(day, 'weekly'));
+	const step = granularity === 'day' ? 1 : 7;
+
+	const buckets: SnapshotBucket[] = [];
+	let i = 0;
+	let last = sorted[0];
+	for (let key = keyOf(firstDay); key <= keyOf(today); key = addDays(key, step)) {
+		const end = addDays(key, step - 1);
+		while (i < sorted.length && sorted[i].day <= end) {
+			last = sorted[i];
+			i++;
+		}
+		buckets.push({ start: key, total: last.total, struggling: last.struggling });
+	}
+	return { granularity, buckets, firstDay };
 }

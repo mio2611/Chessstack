@@ -9,7 +9,9 @@ import {
 	alignZero,
 	buildChartData,
 	buildDailyStats,
+	buildSnapshotSeries,
 	isMature,
+	isStrugglingCard,
 	netSeries,
 	rate,
 	type ReviewLogRow
@@ -161,5 +163,50 @@ check('no negatives keeps zero at the bottom', alignZero([0, 6], [0, 46]), {
 	a: [0, 10],
 	b: [0, 50]
 });
+
+// 10. Struggling cards (red dot on the Build graph): 3+ lapses and not mature,
+// where the graph's maturity test is strictly more than 21 days.
+const card = (state: number | null, lapses: number | null, scheduledDays: number | null) => ({
+	state,
+	lapses,
+	scheduledDays
+});
+check('2 lapses is not struggling', isStrugglingCard(card(2, 2, 3)), false);
+check('3 lapses young card is struggling', isStrugglingCard(card(2, 3, 5)), true);
+check('3 lapses relearning card is struggling', isStrugglingCard(card(3, 3, 1)), true);
+check('3 lapses at exactly 21 days still has the dot', isStrugglingCard(card(2, 3, 21)), true);
+check('3 lapses beyond 21 days is mature, no dot', isStrugglingCard(card(2, 3, 22)), false);
+check('null lapses is not struggling', isStrugglingCard(card(null, null, null)), false);
+
+// 11. Snapshot series: levels carried forward, weeks show their last value.
+const snaps = [
+	{ day: '2026-10-05', total: 100, struggling: 4 },
+	{ day: '2026-10-07', total: 110, struggling: 6 },
+	{ day: '2026-10-15', total: 120, struggling: 5 }
+];
+const daySeries = buildSnapshotSeries(snaps, '1m', '2026-10-16');
+check('no snapshot gives no series', buildSnapshotSeries([], '1m', '2026-10-16'), null);
+check('1 month starts at the first snapshot', daySeries?.firstDay, '2026-10-05');
+check('1 month is daily up to today', daySeries?.buckets.length, 12);
+check('missing day carries the previous value', daySeries?.buckets[1], {
+	start: '2026-10-06',
+	total: 100,
+	struggling: 4
+});
+check('last day carries the latest snapshot', daySeries?.buckets.at(-1), {
+	start: '2026-10-16',
+	total: 120,
+	struggling: 5
+});
+const weekSeries = buildSnapshotSeries(snaps, 'all', '2026-10-16');
+check('weeks start on Monday and show their last value', weekSeries?.buckets, [
+	{ start: '2026-10-05', total: 110, struggling: 6 },
+	{ start: '2026-10-12', total: 120, struggling: 5 }
+]);
+check(
+	'a window starting after the first snapshot keeps the value carried in',
+	buildSnapshotSeries(snaps, '1m', '2026-11-20')?.buckets[0],
+	{ start: '2026-10-22', total: 120, struggling: 5 }
+);
 
 console.log(`\n${checks} checks passed`);

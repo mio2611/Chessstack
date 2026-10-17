@@ -420,6 +420,31 @@ export const reviewLog = pgTable(
 	})
 );
 
+// One row per user, repertoire and local calendar day: how many in-scope cards
+// the repertoire had and how many of them were "struggling" (the red dot on the
+// Build graph). Neither can be rebuilt from other tables, so this accumulates
+// from deployment onward. Today's row is overwritten on each refresh.
+export const cardSnapshot = pgTable(
+	'card_snapshot',
+	{
+		id: serial('id').primaryKey(),
+		userId: integer('user_id')
+			.notNull()
+			.references(() => user.id, { onDelete: 'cascade' }),
+		repertoireId: integer('repertoire_id')
+			.notNull()
+			.references(() => repertoire.id, { onDelete: 'cascade' }),
+		day: text('day').notNull(), // YYYY-MM-DD in the viewer's time zone
+		totalCards: integer('total_cards').notNull(),
+		strugglingCards: integer('struggling_cards').notNull(),
+		updatedAt: timestamp('updated_at').notNull()
+	},
+	(table) => ({
+		uniqueUserRepertoireDay: unique().on(table.userId, table.repertoireId, table.day),
+		repertoireIdIdx: index('idx_card_snapshot_repertoire_id').on(table.repertoireId)
+	})
+);
+
 // A game the user has imported and reviewed for deviations from their repertoire.
 export const reviewedGame = pgTable(
 	'reviewed_game',
