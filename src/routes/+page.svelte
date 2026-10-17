@@ -348,6 +348,7 @@
 						{/if}
 					</div>
 					<div class="state-legend">
+						<span class="legend-total">Total {data.totalCards}</span>
 						<span class="legend-item"
 							><span class="legend-dot state-new"></span> New {data.cardStates.new_}</span
 						>
@@ -709,6 +710,11 @@
 		margin-top: var(--space-2);
 		font-size: 12px;
 		color: var(--color-text-secondary);
+	}
+
+	.legend-total {
+		font-weight: 600;
+		color: var(--color-text-primary);
 	}
 
 	/* ── Shared legend dots ───────────────────────────────────────────── */
