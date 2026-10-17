@@ -6,6 +6,7 @@
 //   - True retention (observed success rate vs. the configured target, from review_log)
 //   - Daily review/maturity aggregates for the retention and matured-cards charts
 //   - Per-opening breakdown (lapse concentration by opening name)
+//   - Daily snapshots of total and struggling cards (card_snapshot)
 //
 // "Mature" follows the Anki convention: Review state and scheduledDays >= 21
 // (see isMature in $lib/stats-aggregation). This is deliberately different
@@ -27,8 +28,10 @@ import {
 	buildDailyStats,
 	countsForRetention,
 	isMature,
+	type CardSnapshotPoint,
 	type DailyStat
 } from '$lib/stats-aggregation';
+import { countCards, loadCardSnapshots, upsertCardSnapshot } from '$lib/server/card-snapshots';
 
 const FORECAST_DAYS = 14;
 const OPENING_STATS_LIMIT = 8;
@@ -87,6 +90,7 @@ export const load: PageServerLoad = async ({ parent, locals, cookies }) => {
 		} as RetentionStats,
 		openingStats: [] as OpeningStat[],
 		dailyStats: [] as DailyStat[],
+		cardSnapshots: [] as CardSnapshotPoint[],
 		today
 	};
 
@@ -124,6 +128,12 @@ export const load: PageServerLoad = async ({ parent, locals, cookies }) => {
 	}
 
 	const now = new Date();
+
+	// ── Card snapshots (total and struggling cards over time) ─────────────
+	// Today's row is refreshed from the cards just loaded, so the charts always
+	// end on the current numbers; earlier days come from the stored rows.
+	await upsertCardSnapshot(userId, activeRepertoireId, today, countCards(scopedCards));
+	const cardSnapshots = await loadCardSnapshots(userId, activeRepertoireId);
 
 	// ── Deck Composition (New / Young+Learning / Mature) ──────────────────
 	// Mature = graduated (state Review) AND interval >= 21 days, matching
@@ -266,6 +276,7 @@ export const load: PageServerLoad = async ({ parent, locals, cookies }) => {
 		retention,
 		openingStats,
 		dailyStats,
+		cardSnapshots,
 		today
 	};
 };
