@@ -3,10 +3,16 @@
 //
 // Deliberately the "lite, single-threaded" WASM build (~1.6MB, no
 // Cross-Origin-Opener/Embedder-Policy headers required), not the "large"
-// (~94MB) or multi-threaded builds — see project notes for the tradeoff.
-// The engine file itself is not committed to git: scripts/copy-engine-assets.js
-// copies it from node_modules/stockfish/bin into static/engine/ on every
-// build (see the "prebuild" script in package.json).
+// (~94MB) or multi-threaded builds, a deliberate choice: the lite build needs
+// no special headers and is enough for a depth-20 search.
+// The engine files are not committed to git: copy-engine-assets.mjs (repo
+// root) downloads the stockfish npm tarball, verifies its integrity hash and
+// extracts them into static/engine/ on every build (see the "prebuild" script
+// in package.json). The file names embed the engine version, which is why
+// /engine/* needs no cache busting: the static server sends no Cache-Control
+// for it (only ETag/Last-Modified), so a browser may reuse the files for a
+// while after a redeploy, harmless as long as the same name always means the
+// same content.
 //
 // Target depth is fixed at 20, with NO time cap — a position can
 // legitimately take 30s or more on a slower machine, and that is accepted
