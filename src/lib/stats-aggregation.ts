@@ -14,7 +14,10 @@ import { periodStartDay, makeDayFormatter } from './local-days';
 export const MATURE_THRESHOLD_DAYS = 21;
 
 /** True when a card in `state` with a scheduled interval of `scheduledDays` is mature. */
-export function isMature(state: number, scheduledDays: number | null | undefined): boolean {
+export function isMature(
+	state: number | null | undefined,
+	scheduledDays: number | null | undefined
+): boolean {
 	return state === State.Review && (scheduledDays ?? 0) >= MATURE_THRESHOLD_DAYS;
 }
 
@@ -250,20 +253,17 @@ export const STRUGGLE_LAPSE_THRESHOLD = 3;
 /**
  * True when the Build graph shows the red dot on a card. Single source of truth
  * for GraphView and the /stats snapshots, so the dots and the chart cannot drift.
- *
- * Careful: the graph's maturity test is strictly greater than 21 days, while
- * isMature above (the /stats convention) is 21 days or more. A card scheduled
- * for exactly 21 days therefore counts as mature in /stats but not in the
- * graph; the dot follows the graph here on purpose.
+ * Maturity is isMature above (Anki's convention, 21 days or more) everywhere.
  */
 export function isStrugglingCard(card: {
 	state: number | null;
 	lapses: number | null;
 	scheduledDays: number | null;
 }): boolean {
-	const matureInGraph =
-		(card.state ?? State.New) === State.Review && (card.scheduledDays ?? 0) > MATURE_THRESHOLD_DAYS;
-	return (card.lapses ?? 0) >= STRUGGLE_LAPSE_THRESHOLD && !matureInGraph;
+	return (
+		(card.lapses ?? 0) >= STRUGGLE_LAPSE_THRESHOLD &&
+		!isMature(card.state ?? State.New, card.scheduledDays)
+	);
 }
 
 // ─── Card snapshots (total and struggling cards over time) ───────────────────
