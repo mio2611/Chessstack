@@ -22,7 +22,7 @@
 	import { untrack } from 'svelte';
 	import type { RepertoireMove } from './buildState.svelte';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
-	import { isStrugglingCard } from '$lib/stats-aggregation';
+	import { isMature as isMatureCard, isStrugglingCard } from '$lib/stats-aggregation';
 
 	// Inlined locally under a distinct name rather than imported from
 	// $lib/fen: importing the shared fenKey here (or even a locally-defined
@@ -124,8 +124,6 @@
 
 	const currentFenKey = $derived(graphFenKey(currentFen));
 
-	const MATURE_SCHEDULED_DAYS = 21; // matches the app's existing "mature" convention
-
 	function cardStateKey(fromKey: string, san: string): string {
 		return `${fromKey}|${san}`;
 	}
@@ -169,7 +167,7 @@
 
 	function isMature(node: LaidOutNode): boolean {
 		const cs = getCardState(node);
-		return !!cs && cs.state === 2 && (cs.scheduledDays ?? 0) > MATURE_SCHEDULED_DAYS;
+		return !!cs && isMatureCard(cs.state, cs.scheduledDays);
 	}
 
 	// Shared with the /stats snapshots so the red dots and the chart never drift.

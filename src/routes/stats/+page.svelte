@@ -226,7 +226,7 @@
 					today={data.today}
 					field="struggling"
 					title="Struggling Cards"
-					note="Cards with the red dot on the Build graph: 3 or more lapses and not mature (scheduled beyond 21 days). Days without a visit keep the previous value."
+					note="Cards with the red dot on the Build graph: 3 or more lapses and not mature (interval under 21 days). Days without a visit keep the previous value."
 					color="var(--color-danger)"
 					name="struggling-cards-period"
 				/>
