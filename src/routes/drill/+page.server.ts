@@ -94,6 +94,10 @@ export const load: PageServerLoad = async ({ locals, parent, url }) => {
 		repertoire: activeRep,
 		moves,
 		dueCards: cardsWithLabels,
+		// Server time used to decide which cards are due. The client compares
+		// card.due against this, not its own clock, so a skewed clock cannot
+		// turn due cards into ungraded practice cards.
+		now: now.toISOString(),
 		drillMode,
 		fromFen
 	};

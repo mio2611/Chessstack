@@ -83,6 +83,8 @@
 	// Snapshot of a card's FSRS state before grading — used for undo.
 	interface UndoSnapshot {
 		cardId: number;
+		// review_log row written by the grade; the server deletes it on undo.
+		logId: number;
 		wasCorrect: boolean;
 		previousState: {
 			due: string | null;
@@ -368,7 +370,9 @@
 			// "Next" shortcut: Space or Enter when the Next button is visible.
 			// Visible when: awaitingNext (graded correct), or incorrect, or hint-used correct.
 			const nextVisible =
-				awaitingNext || phase === 'incorrect' || (phase === 'correct' && hintUsed);
+				awaitingNext ||
+				phase === 'incorrect' ||
+				(phase === 'correct' && (hintUsed || !currentCardGradable));
 			if (nextVisible && (e.key === ' ' || e.key === 'Enter')) {
 				e.preventDefault();
 				handleNext();
@@ -486,6 +490,16 @@
 
 	// The card being drilled right now.
 	const currentCard = $derived(filteredCards[currentCardIdx] ?? null);
+
+	// A card can only be graded once it is due. "Drill all" and subtree drills
+	// also load cards that are not due yet: those are practiced, never graded,
+	// otherwise rote repetition would add FSRS reviews and skew the intervals.
+	// Compared with the server's clock (data.now), not the browser's.
+	function isCardGradable(card: DueCard | null | undefined): boolean {
+		if (!card?.due) return true;
+		return new Date(card.due).getTime() <= new Date(data.now).getTime();
+	}
+	const currentCardGradable = $derived(isCardGradable(currentCard));
 
 	// The FENs from the navigation history, newest-first, for OpeningName.
 	const fenHistory = $derived([...navHistory].reverse().map((e) => e.fromFen));
@@ -978,7 +992,7 @@
 	// Submit the grade for the current card to the server and update stats.
 	// Does NOT advance to the next card — call advanceToNext() separately.
 	async function submitGrade(rating: number): Promise<void> {
-		if (grading || !currentCard) return;
+		if (grading || !currentCard || !isCardGradable(currentCard)) return;
 		grading = true;
 
 		const wasCorrect = phase === 'correct';
@@ -986,8 +1000,10 @@
 		// Snapshot the card's current FSRS state before we overwrite it,
 		// so the user can undo if they picked the wrong grade.
 		// Only for user-chosen grades (correct phase, no hint) — not auto-grades.
+		let snapshot: Omit<UndoSnapshot, 'logId'> | null = null;
+		undoSnapshot = null;
 		if (wasCorrect && !hintUsed) {
-			undoSnapshot = {
+			snapshot = {
 				cardId: currentCard.id,
 				wasCorrect,
 				previousState: {
@@ -1003,8 +1019,6 @@
 					learningSteps: currentCard.learningSteps
 				}
 			};
-		} else {
-			undoSnapshot = null;
 		}
 
 		// Create the session record the first time a card is graded.
@@ -1025,21 +1039,33 @@
 			}
 		}
 
+		let recorded = false;
 		try {
 			const res = await fetch('/api/drill/grade', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ cardId: currentCard.id, rating })
 			});
-			if (!res.ok) throw new Error(`Grade failed: ${res.status}`);
-			void refreshNavCounts();
+			// 409 (not_due): the card was already graded elsewhere (another tab).
+			// Nothing was recorded, which is the right outcome, not an error.
+			if (res.status !== 409) {
+				if (!res.ok) throw new Error(`Grade failed: ${res.status}`);
+				const result = await res.json();
+				recorded = true;
+				if (snapshot && typeof result.logId === 'number') {
+					undoSnapshot = { ...snapshot, logId: result.logId };
+				}
+				void refreshNavCounts();
+			}
 		} catch (err) {
 			console.error('Failed to grade card:', err);
 			// Don't block the user from continuing on a network error.
 		}
 
-		totalReviewed++;
-		if (wasCorrect) correctCount++;
+		if (recorded) {
+			totalReviewed++;
+			if (wasCorrect) correctCount++;
+		}
 
 		grading = false;
 		awaitingNext = true;
@@ -1065,6 +1091,7 @@
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					cardId: undoSnapshot.cardId,
+					logId: undoSnapshot.logId,
 					previousState: undoSnapshot.previousState
 				})
 			});
@@ -1136,6 +1163,7 @@
 	function autoGradeStep(step: LineStep, rating: number): void {
 		const card = findCardForStep(step);
 		if (!card) return; // no SR card for this move (might not exist)
+		if (!isCardGradable(card)) return; // not due yet (Drill all): practice only
 		if (gradedCardIds.has(card.id)) return; // already graded in this session
 		gradedCardIds.add(card.id);
 
@@ -1563,7 +1591,7 @@
 		<!-- Drill-all mode banner -->
 		{#if data.drillMode === 'all'}
 			<div class="drill-all-banner">
-				{data.fromFen ? 'Drilling subtree' : 'Drilling all cards'}
+				{data.fromFen ? 'Drilling subtree' : 'Drilling all cards'} · cards not due are not graded
 				<a href="/drill" class="drill-all-exit">Exit</a>
 			</div>
 		{/if}
@@ -1888,7 +1916,9 @@
 				{:else}
 					<div class="hint-active">
 						<span>💡 Hint active — piece highlighted</span>
-						<span class="hint-penalty">Move will be graded Forgot</span>
+						<span class="hint-penalty"
+							>{currentCardGradable ? 'Move will be graded Forgot' : 'Practice only'}</span
+						>
 					</div>
 				{/if}
 			{/if}
@@ -1960,7 +1990,9 @@
 
 			{#if hintUsed}
 				<!-- Hint was used — will be graded Again when Next is clicked. -->
-				<p class="auto-advance-hint">Will be graded as Forgot</p>
+				<p class="auto-advance-hint">
+					{currentCardGradable ? 'Will be graded as Forgot' : 'Practice only: not due, not graded'}
+				</p>
 				<button class="btn btn--primary next-btn" onclick={handleNext}>
 					Next <kbd>Space</kbd>
 				</button>
@@ -1976,6 +2008,12 @@
 						</button>
 					{/if}
 				</div>
+			{:else if !currentCardGradable}
+				<!-- Not due yet (Drill all / subtree): practice only, nothing is graded. -->
+				<p class="auto-advance-hint">Practice only: not due, not graded</p>
+				<button class="btn btn--primary next-btn" onclick={handleNext}>
+					Next <kbd>Space</kbd>
+				</button>
 			{:else}
 				<div class="section">
 					<div class="section-label">HOW CONFIDENT WAS YOUR RESPONSE?</div>
@@ -2042,7 +2080,9 @@
 				</div>
 			{/if}
 
-			<p class="auto-advance-hint">Will be graded as Forgot</p>
+			<p class="auto-advance-hint">
+				{currentCardGradable ? 'Will be graded as Forgot' : 'Practice only: not due, not graded'}
+			</p>
 			<button class="btn btn--primary next-btn" onclick={handleNext}>
 				Next <kbd>Space</kbd>
 			</button>
