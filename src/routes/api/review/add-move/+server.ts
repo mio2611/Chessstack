@@ -9,7 +9,10 @@
 //
 // The optional `forceReplace` flag handles Case 1 (DEVIATION): when true, if a
 // *different* move already exists from this position, update it rather than
-// returning a 409 conflict. The FSRS card's SAN is updated accordingly.
+// returning a 409 conflict. The move gets a fresh drill card (the old card's
+// FSRS state belonged to a different move), its note is cleared, and the lines
+// that only the old move led to are removed (lines also reachable another way,
+// through a transposition, are kept).
 //
 // Core logic mirrors POST /api/moves to keep behaviour consistent.
 
@@ -20,6 +23,7 @@ import { db } from '$lib/db';
 import { repertoire, userMove, userRepertoireMove } from '$lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { fenKey } from '$lib/fen';
+import { replaceUserMove } from '$lib/server/replace-move';
 
 export const POST: RequestHandler = async ({ locals, request }) => {
 	if (!locals.user) throw error(401, 'Not authenticated');
@@ -84,27 +88,20 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 				);
 			}
 
-			// forceReplace: update the existing move to the new san and toFen.
-			// The old toFen's subtree is orphaned but not deleted — the user can
-			// clean it up in Build mode if needed.
-			// Both writes are in a transaction so they succeed or roll back together.
+			// forceReplace: the user's move at this position changes. Everything
+			// happens in one transaction so it succeeds or rolls back together.
 			await db.transaction(async (tx) => {
-				await tx
-					.update(userMove)
-					.set({ san, toFen, source: 'PERSONAL' })
-					.where(eq(userMove.id, existing.id));
-
-				// Update the SR card's SAN to match the new move.
-				await tx
-					.update(userRepertoireMove)
-					.set({ san })
-					.where(
-						and(
-							eq(userRepertoireMove.userId, user.id),
-							eq(userRepertoireMove.repertoireId, repertoireId),
-							eq(userRepertoireMove.fromFen, fromFen)
-						)
-					);
+				await replaceUserMove(tx, user.id, repertoireId, {
+					moveId: existing.id,
+					fromFen,
+					oldSan: existing.san,
+					newSan: san,
+					newToFen: toFen,
+					source: 'PERSONAL',
+					notes: null,
+					startFen: rep.startFen,
+					now: new Date()
+				});
 			});
 
 			const [updated] = await db.select().from(userMove).where(eq(userMove.id, existing.id));
