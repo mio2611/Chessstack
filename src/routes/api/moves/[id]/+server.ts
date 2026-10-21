@@ -1,9 +1,11 @@
-// DELETE /api/moves/[id] — remove a move and its entire downstream subtree.
+// DELETE /api/moves/[id] — remove a move and the lines that only it led to.
 //
-// Opening repertoires are trees. If you delete a move mid-tree, you leave
-// orphaned branches behind (positions with no reachable path from the start).
-// To keep the tree clean, this endpoint deletes the target move AND every move
-// that is only reachable through it.
+// A repertoire is a graph, not a tree: transpositions let several paths reach
+// the same position, and a line can come back to an earlier position. So we do
+// not delete "everything below the move". We remove the move, then every move
+// that can no longer be reached from the root of the repertoire (see
+// $lib/moveOrphans). Lines that are also reachable another way are kept, and
+// loops cannot make the walk run forever.
 //
 // Example tree:
 //   Start → e4 → e5 → Nf3 → Nc6
@@ -11,59 +13,26 @@
 //
 // Deleting "e5" deletes the entire subtree: Nf3, Nc6, and d4.
 // Deleting "Nf3" only deletes Nf3 and Nc6 — the "e4 → e5 → d4" branch survives.
+// If Nc6's position can also be reached through another opening move order,
+// deleting Nf3 keeps it, and everything below it.
 //
 // This also cleans up the corresponding user_repertoire_move (SR card) rows,
-// so deleted moves do not keep appearing in drill sessions.
+// so deleted moves do not keep appearing in drill sessions. Everything runs in
+// one transaction: it all happens or nothing does.
+//
+// Response: { deleted: number, deletedIds: number[] } — the client removes
+// exactly these moves from its own copy.
 
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { db } from '$lib/db';
-import { userMove, userRepertoireMove } from '$lib/db/schema';
-import { eq, and, notExists, sql } from 'drizzle-orm';
-
-// Recursively deletes all moves reachable from startFen in the given repertoire.
-// Depth-first: removes the deepest branches before their parents.
-// Returns the number of move rows deleted.
-async function deleteSubtree(
-	userId: number,
-	repertoireId: number,
-	startFen: string
-): Promise<number> {
-	let count = 0;
-
-	// Find every move that starts from this position.
-	const children = await db
-		.select()
-		.from(userMove)
-		.where(and(eq(userMove.repertoireId, repertoireId), eq(userMove.fromFen, startFen)));
-
-	for (const child of children) {
-		// Recurse into the child's subtree before deleting the child itself.
-		count += await deleteSubtree(userId, repertoireId, child.toFen);
-
-		// Delete the SR card for this move if one exists.
-		// (Only user-turn moves have SR cards, but a no-op delete is harmless.)
-		await db
-			.delete(userRepertoireMove)
-			.where(
-				and(
-					eq(userRepertoireMove.userId, userId),
-					eq(userRepertoireMove.repertoireId, repertoireId),
-					eq(userRepertoireMove.fromFen, startFen),
-					eq(userRepertoireMove.san, child.san)
-				)
-			);
-
-		// Delete the move row itself.
-		await db.delete(userMove).where(eq(userMove.id, child.id));
-		count++;
-	}
-
-	return count;
-}
+import { userMove, userRepertoireMove, repertoire } from '$lib/db/schema';
+import { eq, and, inArray, notExists, sql } from 'drizzle-orm';
+import { findOrphanedMoveIds, treeRoots } from '$lib/moveOrphans';
 
 export const DELETE: RequestHandler = async ({ locals, params }) => {
 	if (!locals.user) throw error(401, 'Not authenticated');
+	const userId = locals.user.id;
 
 	const id = parseInt(params.id);
 	if (isNaN(id)) throw error(400, 'Invalid move ID');
@@ -72,60 +41,86 @@ export const DELETE: RequestHandler = async ({ locals, params }) => {
 	const [move] = await db
 		.select()
 		.from(userMove)
-		.where(and(eq(userMove.id, id), eq(userMove.userId, locals.user.id)));
+		.where(and(eq(userMove.id, id), eq(userMove.userId, userId)));
 
 	if (!move) throw error(404, 'Move not found');
 
-	// Delete all moves reachable from this move's destination position.
-	const subtreeCount = await deleteSubtree(locals.user.id, move.repertoireId, move.toFen);
+	const deletedIds = await db.transaction(async (tx) => {
+		const [rep] = await tx
+			.select({ startFen: repertoire.startFen })
+			.from(repertoire)
+			.where(and(eq(repertoire.id, move.repertoireId), eq(repertoire.userId, userId)));
 
-	// Delete the SR card for the move being deleted.
-	await db
-		.delete(userRepertoireMove)
-		.where(
-			and(
-				eq(userRepertoireMove.userId, locals.user.id),
-				eq(userRepertoireMove.repertoireId, move.repertoireId),
-				eq(userRepertoireMove.fromFen, move.fromFen),
-				eq(userRepertoireMove.san, move.san)
-			)
+		const rows = await tx
+			.select({
+				id: userMove.id,
+				fromFen: userMove.fromFen,
+				toFen: userMove.toFen,
+				san: userMove.san
+			})
+			.from(userMove)
+			.where(eq(userMove.repertoireId, move.repertoireId));
+
+		// The tree as it will be once this move is gone, and what that cuts off.
+		const after = rows.filter((r) => r.id !== move.id);
+		const orphanIds = new Set(
+			findOrphanedMoveIds(rows, after, treeRoots(rep?.startFen ?? null, move.fromFen))
 		);
+		const doomed = rows.filter((r) => r.id === move.id || orphanIds.has(r.id));
 
-	// Delete the move itself.
-	await db.delete(userMove).where(eq(userMove.id, id));
+		// Delete the SR card of each removed move.
+		// (Only user-turn moves have SR cards, but a no-op delete is harmless.)
+		for (const m of doomed) {
+			await tx
+				.delete(userRepertoireMove)
+				.where(
+					and(
+						eq(userRepertoireMove.userId, userId),
+						eq(userRepertoireMove.repertoireId, move.repertoireId),
+						eq(userRepertoireMove.fromFen, m.fromFen),
+						eq(userRepertoireMove.san, m.san)
+					)
+				);
+		}
 
-	// Defense-in-depth: sweep for orphaned SR cards in this repertoire.
-	// An SR card is orphaned if no userMove exists with the same
-	// (repertoireId, fromFen, san). This catches edge cases like FEN
-	// normalization mismatches from PGN transpositions.
-	// Uses a single NOT EXISTS subquery instead of per-card lookups.
-	const orphanedCards = await db
-		.select({ id: userRepertoireMove.id })
-		.from(userRepertoireMove)
-		.where(
-			and(
-				eq(userRepertoireMove.userId, locals.user.id),
-				eq(userRepertoireMove.repertoireId, move.repertoireId),
-				notExists(
-					db
-						.select({ one: sql`1` })
-						.from(userMove)
-						.where(
-							and(
-								eq(userMove.repertoireId, userRepertoireMove.repertoireId),
-								eq(userMove.fromFen, userRepertoireMove.fromFen),
-								eq(userMove.san, userRepertoireMove.san)
+		const ids = doomed.map((m) => m.id);
+		await tx.delete(userMove).where(inArray(userMove.id, ids));
+
+		// Defense-in-depth: sweep for orphaned SR cards in this repertoire.
+		// An SR card is orphaned if no userMove exists with the same
+		// (repertoireId, fromFen, san). This catches edge cases like FEN
+		// normalization mismatches from PGN transpositions.
+		// Uses a single NOT EXISTS subquery instead of per-card lookups.
+		const orphanedCards = await tx
+			.select({ id: userRepertoireMove.id })
+			.from(userRepertoireMove)
+			.where(
+				and(
+					eq(userRepertoireMove.userId, userId),
+					eq(userRepertoireMove.repertoireId, move.repertoireId),
+					notExists(
+						tx
+							.select({ one: sql`1` })
+							.from(userMove)
+							.where(
+								and(
+									eq(userMove.repertoireId, userRepertoireMove.repertoireId),
+									eq(userMove.fromFen, userRepertoireMove.fromFen),
+									eq(userMove.san, userRepertoireMove.san)
+								)
 							)
-						)
+					)
 				)
-			)
-		);
+			);
 
-	for (const card of orphanedCards) {
-		await db.delete(userRepertoireMove).where(eq(userRepertoireMove.id, card.id));
-	}
+		for (const card of orphanedCards) {
+			await tx.delete(userRepertoireMove).where(eq(userRepertoireMove.id, card.id));
+		}
 
-	return json({ deleted: subtreeCount + 1 });
+		return ids;
+	});
+
+	return json({ deleted: deletedIds.length, deletedIds });
 };
 
 // ── PATCH ──────────────────────────────────────────────────────────────────────
