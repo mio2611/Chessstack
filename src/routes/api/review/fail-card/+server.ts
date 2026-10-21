@@ -15,6 +15,7 @@ import { eq, and } from 'drizzle-orm';
 import { gradeCard, buildReviewLogEntry, Rating } from '$lib/fsrs';
 import { loadFsrsConfig } from '$lib/server/fsrs-config';
 import { fenKey } from '$lib/fen';
+import { lockRepertoire } from '$lib/server/repertoire-lock';
 
 export const POST: RequestHandler = async ({ locals, request }) => {
 	if (!locals.user) throw error(401, 'Not authenticated');
@@ -81,38 +82,60 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 	// then create a new card in an immediately-due state. This is card
 	// creation, not a graded review (the card has never been shown to the
 	// user yet), so no review_log entry is written here.
-	const [moveRow] = await db
-		.select()
-		.from(userMove)
-		.where(
-			and(
-				eq(userMove.userId, userId),
-				eq(userMove.repertoireId, repertoireId),
-				eq(userMove.fromFen, fromFen)
-			)
-		);
+	//
+	// Check and create under the repertoire lock: two simultaneous failures of
+	// the same position would otherwise both find no card and create two.
+	const outcome = await db.transaction(async (tx) => {
+		if (!(await lockRepertoire(tx, repertoireId))) return { kind: 'gone' } as const;
 
-	if (!moveRow) {
-		// No move at this position — can't create a card, but it's not an error.
-		return json({ updated: false, reason: 'No move found for this position' });
-	}
+		const [cardNow] = await tx
+			.select()
+			.from(userRepertoireMove)
+			.where(
+				and(
+					eq(userRepertoireMove.userId, userId),
+					eq(userRepertoireMove.repertoireId, repertoireId),
+					eq(userRepertoireMove.fromFen, fromFen)
+				)
+			);
+		if (cardNow) return { kind: 'exists', due: cardNow.due } as const;
 
-	await db.insert(userRepertoireMove).values({
-		userId,
-		repertoireId,
-		fromFen,
-		san: moveRow.san,
-		due: now,
-		state: 0, // New — will enter the learning phase on first drill
-		reps: 0,
-		lapses: 0,
-		stability: null,
-		difficulty: null,
-		elapsedDays: null,
-		scheduledDays: null,
-		lastReview: null,
-		learningSteps: 0
+		const [moveRow] = await tx
+			.select()
+			.from(userMove)
+			.where(
+				and(
+					eq(userMove.userId, userId),
+					eq(userMove.repertoireId, repertoireId),
+					eq(userMove.fromFen, fromFen)
+				)
+			);
+		// No move at this position: can't create a card, but it's not an error.
+		if (!moveRow) return { kind: 'no-move' } as const;
+
+		await tx.insert(userRepertoireMove).values({
+			userId,
+			repertoireId,
+			fromFen,
+			san: moveRow.san,
+			due: now,
+			state: 0, // New — will enter the learning phase on first drill
+			reps: 0,
+			lapses: 0,
+			stability: null,
+			difficulty: null,
+			elapsedDays: null,
+			scheduledDays: null,
+			lastReview: null,
+			learningSteps: 0
+		});
+		return { kind: 'created' } as const;
 	});
 
-	return json({ updated: true, due: now });
+	if (outcome.kind === 'gone') throw error(404, 'Repertoire not found');
+	if (outcome.kind === 'no-move') {
+		return json({ updated: false, reason: 'No move found for this position' });
+	}
+	// 'exists': another request created the card in the meantime, nothing to add.
+	return json({ updated: true, due: outcome.kind === 'exists' ? outcome.due : now });
 };

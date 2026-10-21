@@ -22,6 +22,7 @@ import {
 import { eq, and } from 'drizzle-orm';
 import { fenKey } from '$lib/fen';
 import { replaceUserMove } from '$lib/server/replace-move';
+import { lockRepertoire } from '$lib/server/repertoire-lock';
 
 export const POST: RequestHandler = async ({ locals, params, request }) => {
 	if (!locals.user) throw error(401, 'Not authenticated');
@@ -209,8 +210,32 @@ export const POST: RequestHandler = async ({ locals, params, request }) => {
 	let skipped = 0;
 
 	await db.transaction(async (tx) => {
+		// Serialise with every other writer of this repertoire. The moves above were
+		// validated against what was stored before the lock: another request may have
+		// added moves since, so check again against what is stored now.
+		if (!(await lockRepertoire(tx, repertoireId))) throw error(404, 'Repertoire not found');
+
+		const stored = await tx
+			.select({ fromFen: userMove.fromFen, san: userMove.san })
+			.from(userMove)
+			.where(eq(userMove.repertoireId, repertoireId));
+		const userSide = repColor === 'WHITE' ? 'w' : 'b';
+		const storedKeys = new Set(stored.map((m) => m.fromFen + '|' + m.san));
+		const userPositions = new Set(
+			stored.filter((m) => m.fromFen.split(' ')[1] === userSide).map((m) => m.fromFen)
+		);
+
 		// Insert new prep moves
 		for (const vm of validatedMoves) {
+			const key = vm.fromFen + '|' + vm.san;
+			if (storedKeys.has(key)) continue; // added by another request meanwhile
+			if (vm.isUserTurn && userPositions.has(vm.fromFen)) {
+				skipped++; // the user got a move at this position meanwhile: keep it
+				continue;
+			}
+			storedKeys.add(key);
+			if (vm.isUserTurn) userPositions.add(vm.fromFen);
+
 			await tx.insert(userMove).values({
 				userId,
 				repertoireId,
@@ -295,6 +320,10 @@ export const POST: RequestHandler = async ({ locals, params, request }) => {
 
 		// Insert connecting opponent moves
 		for (const cm of connectingMoves) {
+			const key = cm.fromFen + '|' + cm.san;
+			if (storedKeys.has(key)) continue; // added by another request meanwhile
+			storedKeys.add(key);
+
 			await tx.insert(userMove).values({
 				userId,
 				repertoireId,

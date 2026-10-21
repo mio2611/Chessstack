@@ -29,6 +29,7 @@ import { db } from '$lib/db';
 import { userMove, userRepertoireMove, repertoire } from '$lib/db/schema';
 import { eq, and, inArray, notExists, sql } from 'drizzle-orm';
 import { findOrphanedMoveIds, treeRoots } from '$lib/moveOrphans';
+import { lockRepertoire } from '$lib/server/repertoire-lock';
 
 export const DELETE: RequestHandler = async ({ locals, params }) => {
 	if (!locals.user) throw error(401, 'Not authenticated');
@@ -46,6 +47,10 @@ export const DELETE: RequestHandler = async ({ locals, params }) => {
 	if (!move) throw error(404, 'Move not found');
 
 	const deletedIds = await db.transaction(async (tx) => {
+		// Serialise with every other writer of this repertoire: the tree read below
+		// must not change while the orphans are worked out.
+		if (!(await lockRepertoire(tx, move.repertoireId))) throw error(404, 'Move not found');
+
 		const [rep] = await tx
 			.select({ startFen: repertoire.startFen })
 			.from(repertoire)
@@ -60,6 +65,9 @@ export const DELETE: RequestHandler = async ({ locals, params }) => {
 			})
 			.from(userMove)
 			.where(eq(userMove.repertoireId, move.repertoireId));
+
+		// Another request may have deleted it (or cut it off) while we waited.
+		if (!rows.some((r) => r.id === move.id)) throw error(404, 'Move not found');
 
 		// The tree as it will be once this move is gone, and what that cuts off.
 		const after = rows.filter((r) => r.id !== move.id);

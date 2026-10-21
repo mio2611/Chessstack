@@ -27,6 +27,7 @@ import { repertoire, userMove, userRepertoireMove } from '$lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { fenKey, STARTING_FEN } from '$lib/fen';
 import { replaceUserMove } from '$lib/server/replace-move';
+import { lockRepertoire } from '$lib/server/repertoire-lock';
 
 // Transaction type extracted from db.transaction() callback parameter
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -163,6 +164,10 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 
 	// Single transaction for all writes
 	const result = await db.transaction(async (tx) => {
+		// Serialise with every other writer of this repertoire: what is stored is read
+		// below, and must not change under this import.
+		if (!(await lockRepertoire(tx, repertoireId))) throw error(404, 'Repertoire not found');
+
 		let inserted = 0;
 		let replaced = 0;
 		let skipped = 0;
