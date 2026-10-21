@@ -7,6 +7,11 @@
 // Annotations: PGN comments {like this} are preserved and attached to the
 // preceding move as `annotation`. Engine-specific tags like [%evp ...] and
 // [%cal ...] are filtered out since they're not human-readable.
+//
+// A file can hold several games. The text is scanned once, left to right, so a
+// bracket inside a header value or a comment can never be mistaken for the
+// start or end of something else. Each game is replayed from the standard
+// starting position and the edges of all games are merged.
 
 import { Chess } from 'chess.js';
 import { fenKey, STARTING_FEN } from '$lib/fen';
@@ -52,55 +57,202 @@ function cleanComment(raw: string): string | null {
 	return text.length > 0 ? text : null;
 }
 
-// ─── Tokenizer ──────────────────────────────────────────────────────────────
+// ─── Scanner ────────────────────────────────────────────────────────────────
+
+/** One game of a PGN file, as a flat token stream. */
+interface ParsedGame {
+	/** SAN moves, '(' and ')', and comment tokens (prefixed with COMMENT_PREFIX). */
+	tokens: string[];
+	/** True once the game has at least one move. */
+	hasMoves: boolean;
+	/** True when the game starts from a custom position (SetUp / FEN header). */
+	customStart: boolean;
+	/** Problems met while scanning (e.g. a comment that is never closed). */
+	problems: string[];
+}
+
+function newGame(): ParsedGame {
+	return { tokens: [], hasMoves: false, customStart: false, problems: [] };
+}
+
+// A header line: one or more [Name "value"] tags. The value is a quoted string,
+// so it may contain ']' or '[' freely; only an unescaped quote ends it.
+// Sticky: matched only at the exact position being scanned.
+const TAG_AT = /[ \t]*\[[A-Za-z0-9_]+[ \t]+"(?:[^"\\\r\n]|\\.)*"[ \t]*\]/y;
+const END_OF_LINE = /[ \t]*(?:\r?\n|$)/y;
+const TAG = /\[([A-Za-z0-9_]+)[ \t]+"((?:[^"\\\r\n]|\\.)*)"[ \t]*\]/g;
+
+// Replaying a move through Chess.js costs roughly 100 µs, and it runs on the
+// server's single thread: a file is bounded by its number of moves, not by its
+// size in bytes. Beyond this, refuse with a clear message rather than freeze the
+// app for a minute. ~150 000 moves is about 15 s of work.
+const MAX_MOVES = 150_000;
+
+const RESULT_MARKERS = new Set(['1-0', '0-1', '1/2-1/2', '*']);
+const STANDARD_PLACEMENT = STARTING_FEN.split(' ')[0];
 
 /**
- * Tokenize raw PGN text into a flat array of tokens: SAN moves, '(', ')',
- * and comment tokens (prefixed with COMMENT_PREFIX).
- * Strips headers, NAGs, move numbers, and result markers.
+ * The header line starting at `start` (one or more tags, then the end of the
+ * line), or null when there is none. Tags are matched one at a time rather than
+ * with a repeated group, which keeps the matching linear on any input.
  */
-function tokenize(rawPgn: string): string[] {
-	let pgn = rawPgn;
+function matchHeaderLine(text: string, start: number): string | null {
+	let pos = start;
+	let tags = 0;
+	for (;;) {
+		TAG_AT.lastIndex = pos;
+		const m = TAG_AT.exec(text);
+		if (!m) break;
+		pos += m[0].length;
+		tags++;
+	}
+	if (tags === 0) return null;
+	END_OF_LINE.lastIndex = pos;
+	const end = END_OF_LINE.exec(text);
+	if (!end) return null;
+	return text.slice(start, pos + end[0].length);
+}
 
-	// Strip header tags: [Key "Value"]
-	pgn = pgn.replace(/\[[^\]]*\]/g, '');
+function applyHeaders(game: ParsedGame, headerLine: string): void {
+	for (const m of headerLine.matchAll(TAG)) {
+		const name = m[1].toLowerCase();
+		const value = m[2];
+		if (name === 'setup' && value === '1') game.customStart = true;
+		if (name === 'fen' && value.split(' ')[0] !== STANDARD_PLACEMENT) game.customStart = true;
+	}
+}
 
-	// Extract comments {anything} and replace with placeholder tokens.
-	// Comments can span multiple lines. We replace each with a unique
-	// marker so they survive the remaining text transformations.
-	const comments: string[] = [];
-	pgn = pgn.replace(/\{([^}]*)\}/g, (_match, content: string) => {
-		const idx = comments.length;
-		comments.push(content);
-		return ` ${COMMENT_PREFIX}${idx} `;
-	});
+function isWordBreak(ch: string): boolean {
+	return (
+		ch === ' ' ||
+		ch === '\t' ||
+		ch === '\n' ||
+		ch === '\r' ||
+		ch === '{' ||
+		ch === '(' ||
+		ch === ')' ||
+		ch === ';'
+	);
+}
 
-	// Strip NAGs: $1, $2, etc. and symbolic NAGs like !, ?, !!, ??, !?, ?!
-	pgn = pgn.replace(/\$\d+/g, '');
-	pgn = pgn.replace(/[!?]{1,2}/g, '');
+/**
+ * Scan PGN text into games. A new game starts at a header that follows moves,
+ * or after a result marker (1-0, 0-1, 1/2-1/2, *) outside any variation.
+ * Strips headers, NAGs, move numbers and result markers; comments and
+ * variation parentheses become tokens.
+ */
+function scanGames(text: string): ParsedGame[] {
+	const games: ParsedGame[] = [];
+	let game = newGame();
+	let depth = 0; // parenthesis depth: a result marker only ends a game at depth 0
+	let moveCount = 0;
+	let i = 0;
+	let lineStart = true;
 
-	// Strip result markers at end: 1-0, 0-1, 1/2-1/2, *
-	pgn = pgn.replace(/\b1-0\b|\b0-1\b|\b1\/2-1\/2\b|\*/g, '');
+	const endGame = () => {
+		if (game.hasMoves) games.push(game);
+		game = newGame();
+		depth = 0;
+	};
 
-	// Strip move numbers: "1." "1..." "12." "12..." etc.
-	// Must be careful not to eat castling notation (O-O, O-O-O).
-	pgn = pgn.replace(/\d+\.{1,3}/g, '');
+	while (i < text.length) {
+		if (lineStart) {
+			lineStart = false;
 
-	// Now split on whitespace, keeping ( and ) as separate tokens.
-	// First, ensure parens are space-separated from adjacent text.
-	pgn = pgn.replace(/\(/g, ' ( ');
-	pgn = pgn.replace(/\)/g, ' ) ');
+			// Header line (only recognised at the start of a line).
+			const header = matchHeaderLine(text, i);
+			if (header !== null) {
+				if (game.hasMoves) endGame();
+				applyHeaders(game, header);
+				i += header.length;
+				lineStart = true; // the header consumed its newline
+				continue;
+			}
 
-	const rawTokens = pgn.split(/\s+/).filter((t) => t.length > 0);
-
-	// Resolve comment placeholders back into COMMENT_PREFIX tokens with content
-	return rawTokens.map((t) => {
-		if (t.startsWith(COMMENT_PREFIX)) {
-			const idx = parseInt(t.slice(COMMENT_PREFIX.length));
-			return COMMENT_PREFIX + (comments[idx] ?? '');
+			// PGN escape line: ignored.
+			if (text[i] === '%') {
+				const nl = text.indexOf('\n', i);
+				i = nl === -1 ? text.length : nl + 1;
+				lineStart = true;
+				continue;
+			}
 		}
-		return t;
-	});
+
+		const c = text[i];
+
+		if (c === '\n') {
+			lineStart = true;
+			i++;
+			continue;
+		}
+		if (c === ' ' || c === '\t' || c === '\r') {
+			i++;
+			continue;
+		}
+
+		// {comment}: runs to the next '}', brackets inside are just text.
+		if (c === '{') {
+			const end = text.indexOf('}', i + 1);
+			if (end === -1) {
+				game.problems.push('Unterminated comment: the rest of the text was ignored');
+				game.tokens.push(COMMENT_PREFIX + text.slice(i + 1));
+				i = text.length;
+			} else {
+				game.tokens.push(COMMENT_PREFIX + text.slice(i + 1, end));
+				i = end + 1;
+			}
+			continue;
+		}
+
+		// ;comment: runs to the end of the line.
+		if (c === ';') {
+			const nl = text.indexOf('\n', i);
+			const end = nl === -1 ? text.length : nl;
+			game.tokens.push(COMMENT_PREFIX + text.slice(i + 1, end));
+			i = end;
+			continue;
+		}
+
+		if (c === '(') {
+			depth++;
+			game.tokens.push('(');
+			i++;
+			continue;
+		}
+		if (c === ')') {
+			depth = Math.max(0, depth - 1);
+			game.tokens.push(')');
+			i++;
+			continue;
+		}
+
+		// A word: a move, a move number, a NAG or a result marker.
+		let j = i;
+		while (j < text.length && !isWordBreak(text[j])) j++;
+		const word = text.slice(i, j);
+		i = j;
+
+		if (/^\$\d+$/.test(word)) continue; // NAG: $1, $2...
+		if (RESULT_MARKERS.has(word)) {
+			if (depth === 0) endGame();
+			continue;
+		}
+
+		// Drop a leading move number ("1.", "12...", "1.e4") and !? glyphs.
+		const san = word.replace(/^\d+\.+/, '').replace(/[!?]+/g, '');
+		if (!san) continue;
+
+		if (++moveCount > MAX_MOVES) {
+			throw new Error(
+				`PGN is too large: more than ${MAX_MOVES.toLocaleString('en-US')} moves. Split it into smaller files.`
+			);
+		}
+		game.tokens.push(san);
+		game.hasMoves = true;
+	}
+
+	if (game.hasMoves) games.push(game);
+	return games;
 }
 
 /**
@@ -112,7 +264,7 @@ function tokenize(rawPgn: string): string[] {
  *
  * Comment tokens (COMMENT_PREFIX) are attached to the preceding move node.
  */
-function buildTree(tokens: string[]): MoveNode[] {
+function buildTree(tokens: string[]): { nodes: MoveNode[]; leftover: number } {
 	let pos = 0;
 
 	function parseLine(): MoveNode[] {
@@ -157,7 +309,9 @@ function buildTree(tokens: string[]): MoveNode[] {
 		return nodes;
 	}
 
-	return parseLine();
+	// A ')' with no matching '(' stops the parse early: report how much was left.
+	const nodes = parseLine();
+	return { nodes, leftover: tokens.length - pos };
 }
 
 // ─── Replay ─────────────────────────────────────────────────────────────────
@@ -232,6 +386,11 @@ function replayTree(
  * Parse a PGN string with variations and produce a deduplicated list of
  * repertoire edges (fromFen → toFen via san).
  *
+ * The text may hold several games: each is replayed from the standard starting
+ * position and their edges are merged. A game that starts from a custom
+ * position is skipped with a message (the file is refused only when no game
+ * can be imported). With several games, messages are prefixed "Game N: ".
+ *
  * Handles nested variations of arbitrary depth. Invalid moves within a
  * variation skip that sub-line and collect an error message.
  *
@@ -242,28 +401,43 @@ export function parseVariationPgn(
 	rawPgn: string,
 	repertoireColor: 'WHITE' | 'BLACK'
 ): { edges: PgnEdge[]; errors: string[] } {
-	const pgn = rawPgn.trim();
+	const pgn = rawPgn.replace(/^\uFEFF/, '').trim();
 	if (!pgn) throw new Error('PGN is empty');
 
-	// Reject custom starting positions
-	if (/\[\s*SetUp\s+"1"\s*\]/i.test(pgn)) {
+	const games = scanGames(pgn);
+	if (games.length === 0) throw new Error('PGN contains no moves');
+
+	const multi = games.length > 1;
+	const edges = new Map<string, PgnEdge>();
+	const errors: string[] = [];
+	let imported = 0;
+
+	games.forEach((game, idx) => {
+		const label = multi ? `Game ${idx + 1}: ` : '';
+
+		if (game.customStart) {
+			errors.push(`${label}skipped, custom starting positions are not supported`);
+			return;
+		}
+		imported++;
+
+		for (const problem of game.problems) errors.push(label + problem);
+
+		const { nodes, leftover } = buildTree(game.tokens);
+		if (leftover > 0) {
+			errors.push(`${label}unmatched ')', the rest of the game was ignored`);
+		}
+
+		const gameErrors: string[] = [];
+		replayTree(nodes, STARTING_FEN, repertoireColor, edges, gameErrors, []);
+		for (const message of gameErrors) errors.push(label + message);
+	});
+
+	if (imported === 0) {
 		throw new Error(
 			'Custom starting positions are not supported — only standard games can be imported'
 		);
 	}
-
-	// Tokenize and build tree
-	const tokens = tokenize(pgn);
-	if (tokens.length === 0) throw new Error('PGN contains no moves');
-
-	const tree = buildTree(tokens);
-	if (tree.length === 0) throw new Error('PGN contains no moves');
-
-	// Replay through Chess.js to compute FENs
-	const edges = new Map<string, PgnEdge>();
-	const errors: string[] = [];
-
-	replayTree(tree, STARTING_FEN, repertoireColor, edges, errors, []);
 
 	return { edges: Array.from(edges.values()), errors };
 }

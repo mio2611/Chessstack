@@ -147,6 +147,10 @@
 		input.value = '';
 	}
 
+	// The server refuses request bodies above BODY_SIZE_LIMIT (512 kB by default).
+	const TOO_LARGE_MESSAGE =
+		'This import is too large for the server (HTTP 413). Raise BODY_SIZE_LIMIT in your docker-compose file, or import the PGN in smaller parts.';
+
 	// ── Parse ────────────────────────────────────────────────────────────────
 
 	async function handleParse() {
@@ -162,6 +166,10 @@
 			});
 
 			if (!res.ok) {
+				if (res.status === 413) {
+					parseError = TOO_LARGE_MESSAGE;
+					return;
+				}
 				const data = await res.json().catch(() => ({ message: 'Parse failed' }));
 				parseError = data.message || `Parse failed (${res.status})`;
 				return;
@@ -247,6 +255,11 @@
 			});
 
 			if (!res.ok) {
+				if (res.status === 413) {
+					importError = TOO_LARGE_MESSAGE;
+					step = 'preview';
+					return;
+				}
 				const data = await res.json().catch(() => ({ message: 'Import failed' }));
 				importError = data.message || `Import failed (${res.status})`;
 				step = 'preview'; // go back to preview so user can retry
