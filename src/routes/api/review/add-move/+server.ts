@@ -24,6 +24,7 @@ import { repertoire, userMove, userRepertoireMove } from '$lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { fenKey } from '$lib/fen';
 import { replaceUserMove } from '$lib/server/replace-move';
+import { lockRepertoire } from '$lib/server/repertoire-lock';
 
 export const POST: RequestHandler = async ({ locals, request }) => {
 	if (!locals.user) throw error(401, 'Not authenticated');
@@ -68,29 +69,27 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 		throw error(400, 'Invalid FEN or illegal move');
 	}
 
-	if (isUserTurn) {
-		const [existing] = await db
-			.select()
-			.from(userMove)
-			.where(and(eq(userMove.repertoireId, repertoireId), eq(userMove.fromFen, fromFen)));
+	// Check, then write, inside one transaction that first locks the repertoire:
+	// two simultaneous requests would otherwise both find nothing and both insert.
+	// The new move and (for the user's own moves) its SR card, or a replacement,
+	// succeed or roll back together. Opponent moves are not drilled.
+	const outcome = await db.transaction(async (tx) => {
+		if (!(await lockRepertoire(tx, repertoireId))) return { kind: 'gone' } as const;
 
-		if (existing) {
-			if (existing.san === san) {
-				// Exact same move already exists — idempotent.
-				return json(existing);
-			}
+		if (isUserTurn) {
+			const [existing] = await tx
+				.select()
+				.from(userMove)
+				.where(and(eq(userMove.repertoireId, repertoireId), eq(userMove.fromFen, fromFen)));
 
-			if (!forceReplace) {
-				// Different move exists and we're not replacing — signal conflict.
-				return json(
-					{ error: 'A different move already exists from this position', existing },
-					{ status: 409 }
-				);
-			}
+			if (existing) {
+				// Exact same move already exists: idempotent.
+				if (existing.san === san) return { kind: 'existing', move: existing } as const;
 
-			// forceReplace: the user's move at this position changes. Everything
-			// happens in one transaction so it succeeds or rolls back together.
-			await db.transaction(async (tx) => {
+				// Different move exists and we're not replacing: signal conflict.
+				if (!forceReplace) return { kind: 'conflict', existing } as const;
+
+				// forceReplace: the user's move at this position changes.
 				await replaceUserMove(tx, user.id, repertoireId, {
 					moveId: existing.id,
 					fromFen,
@@ -102,33 +101,25 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 					startFen: rep.startFen,
 					now: new Date()
 				});
-			});
+				const [updated] = await tx.select().from(userMove).where(eq(userMove.id, existing.id));
+				return { kind: 'replaced', move: updated } as const;
+			}
+		} else {
+			// Opponent's turn: multiple moves allowed, but no exact duplicates.
+			const [existing] = await tx
+				.select()
+				.from(userMove)
+				.where(
+					and(
+						eq(userMove.repertoireId, repertoireId),
+						eq(userMove.fromFen, fromFen),
+						eq(userMove.san, san)
+					)
+				);
 
-			const [updated] = await db.select().from(userMove).where(eq(userMove.id, existing.id));
-			return json(updated);
+			if (existing) return { kind: 'existing', move: existing } as const;
 		}
-	} else {
-		// Opponent's turn — multiple moves allowed, but no exact duplicates.
-		const [existing] = await db
-			.select()
-			.from(userMove)
-			.where(
-				and(
-					eq(userMove.repertoireId, repertoireId),
-					eq(userMove.fromFen, fromFen),
-					eq(userMove.san, san)
-				)
-			);
 
-		if (existing) {
-			return json(existing);
-		}
-	}
-
-	// Insert the new move and (for user's own moves) its SR card in a single
-	// transaction so both writes either succeed or roll back together.
-	// Opponent moves are not drilled.
-	const savedMove = await db.transaction(async (tx) => {
 		const [move] = await tx
 			.insert(userMove)
 			.values({
@@ -162,8 +153,16 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 			});
 		}
 
-		return move;
+		return { kind: 'created', move } as const;
 	});
 
-	return json(savedMove, { status: 201 });
+	if (outcome.kind === 'gone') throw error(404, 'Repertoire not found');
+	if (outcome.kind === 'conflict') {
+		return json(
+			{ error: 'A different move already exists from this position', existing: outcome.existing },
+			{ status: 409 }
+		);
+	}
+	if (outcome.kind === 'created') return json(outcome.move, { status: 201 });
+	return json(outcome.move);
 };
