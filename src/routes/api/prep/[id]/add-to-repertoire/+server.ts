@@ -21,6 +21,7 @@ import {
 } from '$lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { fenKey } from '$lib/fen';
+import { replaceUserMove } from '$lib/server/replace-move';
 
 export const POST: RequestHandler = async ({ locals, params, request }) => {
 	if (!locals.user) throw error(401, 'Not authenticated');
@@ -246,7 +247,9 @@ export const POST: RequestHandler = async ({ locals, params, request }) => {
 		for (const conflict of conflicts) {
 			const key = fenKey(conflict.fromFen) + '|' + conflict.prepMove;
 			if (replacementSet.has(key)) {
-				// User chose the prep move — delete existing move's subtree and replace
+				// User chose the prep move: replace the existing one. It gets a fresh
+				// drill card and no note, and the lines only the old move led to are
+				// removed; lines reachable another way are kept.
 				const [existingRow] = await tx
 					.select()
 					.from(userMove)
@@ -259,53 +262,31 @@ export const POST: RequestHandler = async ({ locals, params, request }) => {
 					);
 
 				if (existingRow) {
-					// Delete old SR card
-					await tx
-						.delete(userRepertoireMove)
-						.where(
-							and(
-								eq(userRepertoireMove.userId, userId),
-								eq(userRepertoireMove.repertoireId, repertoireId),
-								eq(userRepertoireMove.fromFen, conflict.fromFen),
-								eq(userRepertoireMove.san, conflict.existingMove)
-							)
-						);
-					// Update the move in place
-					await tx
-						.update(userMove)
-						.set({
-							san: conflict.prepMove,
-							toFen: (() => {
-								try {
-									const chess = new Chess(conflict.fromFen);
-									const r = chess.move(conflict.prepMove);
-									return r ? fenKey(chess.fen()) : existingRow.toFen;
-								} catch {
-									return existingRow.toFen;
-								}
-							})(),
+					let newToFen: string | null;
+					try {
+						const chess = new Chess(conflict.fromFen);
+						newToFen = chess.move(conflict.prepMove) ? fenKey(chess.fen()) : null;
+					} catch {
+						newToFen = null;
+					}
+
+					if (newToFen) {
+						await replaceUserMove(tx, userId, repertoireId, {
+							moveId: existingRow.id,
+							fromFen: conflict.fromFen,
+							oldSan: existingRow.san,
+							newSan: conflict.prepMove,
+							newToFen,
 							source: 'PREP_EXPORT',
-							createdAt: now
-						})
-						.where(eq(userMove.id, existingRow.id));
-					// Create new SR card
-					await tx.insert(userRepertoireMove).values({
-						userId,
-						repertoireId,
-						fromFen: conflict.fromFen,
-						san: conflict.prepMove,
-						due: now,
-						state: 0,
-						reps: 0,
-						lapses: 0,
-						stability: null,
-						difficulty: null,
-						elapsedDays: null,
-						scheduledDays: null,
-						lastReview: null,
-						learningSteps: 0
-					});
-					replaced++;
+							notes: null,
+							startFen: rep.startFen,
+							now
+						});
+						replaced++;
+					} else {
+						// The prep move is not playable here: keep the existing move.
+						skipped++;
+					}
 				}
 			} else {
 				skipped++; // Keep existing move
