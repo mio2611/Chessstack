@@ -46,7 +46,14 @@
 		playIncorrect
 	} from '$lib/sounds';
 	import { tutorialStep } from '$lib/stores/tutorial';
-	import { getEffectiveStartFens, buildInScopeFens } from '$lib/repertoire';
+	import {
+		enumerateLines,
+		indexCards,
+		lineHasDueStep,
+		sortLinesByWeakness,
+		MAX_ENUMERATED_LINES,
+		type LineStep
+	} from '$lib/drillLines';
 	import { refreshNavCounts } from '$lib/stores/navCounts';
 
 	// Shape of a move row from the server (user_move table).
@@ -107,14 +114,6 @@
 		san: string;
 		from: string;
 		to: string;
-	}
-
-	// One step in a root-to-leaf line through the repertoire tree.
-	interface LineStep {
-		fromFen: string;
-		toFen: string;
-		san: string;
-		isUserMove: boolean; // true when it's the user's color to move
 	}
 
 	type Phase = 'idle' | 'playing' | 'waiting' | 'correct' | 'incorrect' | 'complete';
@@ -478,11 +477,25 @@
 	// totalLineCount is the unfiltered count, used to tell apart "repertoire
 	// has no lines at all yet" from "every line is already reviewed" — the
 	// "No lines to drill" empty state below used to conflate the two.
+	// Every line of the tree, enumerated once: the start screen's count and the
+	// session itself both read it. `truncated` is only true when a safety bound is
+	// hit (a graph of transpositions with millions of paths), see $lib/drillLines.
+	const lineEnumeration = $derived.by(() =>
+		drillType !== 'line'
+			? { lines: [] as LineStep[][], truncated: false }
+			: enumerateLines(
+					allMoves,
+					data.repertoire.color as 'WHITE' | 'BLACK',
+					data.repertoire.startFen ?? null
+				)
+	);
+	// The session's cards as a set, built once for the filter and the sort.
+	const cardIndex = $derived(indexCards(allDueCards));
 	const lineCounts = $derived.by(() => {
 		if (drillType !== 'line') return { total: 0, due: 0 };
-		const raw = enumerateLines(allMoves, data.repertoire.color as 'WHITE' | 'BLACK');
+		const raw = lineEnumeration.lines;
 		const scoped =
-			data.drillMode === 'all' ? raw : raw.filter((line) => lineHasDueStep(line, allDueCards));
+			data.drillMode === 'all' ? raw : raw.filter((line) => lineHasDueStep(line, cardIndex));
 		return { total: raw.length, due: scoped.length };
 	});
 	const dueLineCount = $derived(lineCounts.due);
@@ -705,129 +718,6 @@
 		}
 
 		return pathSans;
-	}
-
-	// ── Line enumeration ──────────────────────────────────────────────────────
-
-	// Enumerate all root-to-leaf lines through the repertoire's move tree.
-	// A "leaf" is any position with no outgoing edges. Each line is an ordered
-	// list of LineSteps from the starting position to the leaf.
-	//
-	// Lead-in moves (before the repertoire's effective start position — see
-	// getEffectiveStartFens) are still walked and auto-played for context,
-	// but are never marked isUserMove, even when they fall on the user's own
-	// turn. This mirrors card mode and the Gap Finder, which both exclude
-	// lead-in positions from what's actively drilled — the "Set Start"
-	// button in Build Mode promises exactly that ("moves before it won't be
-	// drilled"), which line mode did not previously honor.
-	function enumerateLines(moves: RepertoireMove[], color: 'WHITE' | 'BLACK'): LineStep[][] {
-		const adj = new SvelteMap<string, RepertoireMove[]>();
-		for (const m of moves) {
-			const key = fenKey(m.fromFen);
-			const list = adj.get(key);
-			if (list) list.push(m);
-			else adj.set(key, [m]);
-		}
-
-		// The lead-in exclusion below only makes sense for a custom start
-		// position (Build Mode's "Set Start"). When startFen is null,
-		// getEffectiveStartFens defines scope as starting *after* the user's
-		// own first move (a convention meant for SR-card/gap scoping, where
-		// the first move itself is never quizzed) — reusing that here would
-		// wrongly auto-play the user's actual first move in every line.
-		const customStartFen = data.repertoire.startFen ?? null;
-		const inScope = customStartFen
-			? buildInScopeFens(getEffectiveStartFens(customStartFen, moves, color), moves)
-			: null;
-
-		const lines: LineStep[][] = [];
-		const MAX_LINES = 500;
-
-		function isUserTurn(fen: string): boolean {
-			const sideToMove = fen.split(' ')[1]; // 'w' or 'b'
-			return (color === 'WHITE' && sideToMove === 'w') || (color === 'BLACK' && sideToMove === 'b');
-		}
-
-		function dfs(fen: string, path: LineStep[], visited: Set<string>): void {
-			if (lines.length >= MAX_LINES) return;
-
-			const children = adj.get(fenKey(fen)) ?? [];
-			if (children.length === 0) {
-				// Leaf — only record if path has at least one user move.
-				if (path.some((s) => s.isUserMove)) {
-					lines.push([...path]);
-				}
-				return;
-			}
-
-			for (const child of children) {
-				const toKey = fenKey(child.toFen);
-				if (visited.has(toKey)) continue; // cycle protection
-
-				visited.add(toKey);
-				path.push({
-					fromFen: child.fromFen,
-					toFen: child.toFen,
-					san: child.san,
-					isUserMove:
-						isUserTurn(child.fromFen) && (inScope === null || inScope.has(fenKey(child.fromFen)))
-				});
-				dfs(child.toFen, path, visited);
-				path.pop();
-				visited.delete(toKey);
-			}
-		}
-
-		const startKey = fenKey(STARTING_FEN);
-		const visited = new Set<string>([startKey]);
-		dfs(STARTING_FEN, [], visited);
-		return lines;
-	}
-
-	// Score a line by how many weak/due SR cards it contains.
-	// Higher score = more urgent to drill.
-	function scoreLine(line: LineStep[], dueCards: DueCard[]): number {
-		const dueSet = new Set(dueCards.map((c) => fenKey(c.fromFen) + ':' + c.san));
-		const cardMap = new SvelteMap<string, DueCard>();
-		for (const c of dueCards) {
-			cardMap.set(fenKey(c.fromFen) + ':' + c.san, c);
-		}
-
-		let score = 0;
-		for (const step of line) {
-			if (!step.isUserMove) continue;
-			const key = fenKey(step.fromFen) + ':' + step.san;
-			if (dueSet.has(key)) {
-				score += 3;
-			} else {
-				const card = cardMap.get(key);
-				if (card && (card.lapses ?? 0) > 0) score += 1;
-			}
-		}
-		return score;
-	}
-
-	// Whether a line contains at least one step matching a currently-due card.
-	// Used to scope line mode to "due" the same way card mode already is —
-	// enumerateLines produces every line in the tree regardless of due
-	// status, sortLinesByWeakness only orders them, so without this filter
-	// "due" line-mode sessions silently drilled (and auto-graded) the whole
-	// repertoire, duplicating what the existing "Drill all cards" link
-	// (?mode=all) is for.
-	function lineHasDueStep(line: LineStep[], dueCards: DueCard[]): boolean {
-		const dueSet = new Set(dueCards.map((c) => fenKey(c.fromFen) + ':' + c.san));
-		return line.some((s) => s.isUserMove && dueSet.has(fenKey(s.fromFen) + ':' + s.san));
-	}
-
-	// Sort lines by score descending, breaking ties randomly.
-	function sortLinesByWeakness(lines: LineStep[][], dueCards: DueCard[]): LineStep[][] {
-		const scored = lines.map((line) => ({
-			line,
-			score: scoreLine(line, dueCards),
-			rand: Math.random()
-		}));
-		scored.sort((a, b) => b.score - a.score || a.rand - b.rand);
-		return scored.map((s) => s.line);
 	}
 
 	// Reset board state to the starting position.
@@ -1198,11 +1088,10 @@
 	// Initialize line mode: enumerate lines, filter to due unless in "all"
 	// mode, sort, and start the first line.
 	function initLineMode(): void {
-		const color = data.repertoire.color as 'WHITE' | 'BLACK';
-		const raw = enumerateLines(allMoves, color);
+		const raw = lineEnumeration.lines;
 		const scoped =
-			data.drillMode === 'all' ? raw : raw.filter((line) => lineHasDueStep(line, allDueCards));
-		allLines = sortLinesByWeakness(scoped, allDueCards);
+			data.drillMode === 'all' ? raw : raw.filter((line) => lineHasDueStep(line, cardIndex));
+		allLines = sortLinesByWeakness(scoped, cardIndex);
 		gradedCardIds.clear();
 		currentLineIdx = 0;
 		lineComplete = false;
@@ -1727,6 +1616,12 @@
 					<p class="empty-hint">
 						No cards due right now. Come back later or build more repertoire.
 					</p>
+					{#if drillType === 'line' && lineEnumeration.truncated}
+						<p class="empty-hint">
+							Very large repertoire: only the first {MAX_ENUMERATED_LINES.toLocaleString('en-US')} lines
+							were checked.
+						</p>
+					{/if}
 					<a href="/build" class="btn btn--primary">Build Mode</a>
 					<a
 						href="/drill?mode=all{drillType === 'line' ? '&type=line' : ''}"
@@ -1739,6 +1634,12 @@
 						{drillType === 'card' ? filteredCards.length : dueLineCount}
 					</div>
 					<div class="start-label">{drillType === 'card' ? 'cards' : 'lines'} to drill</div>
+					{#if drillType === 'line' && lineEnumeration.truncated}
+						<p class="empty-hint">
+							Very large repertoire: only the first {MAX_ENUMERATED_LINES.toLocaleString('en-US')} lines
+							are drilled.
+						</p>
+					{/if}
 
 					{#if drillType === 'card'}
 						<div class="start-breakdown">
