@@ -10,6 +10,7 @@ import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import { Chess } from 'chess.js';
 import { playMove, playCapture } from '$lib/sounds';
 import { fenKey, STARTING_FEN } from '$lib/fen';
+import { findOrphanedMoveIds, treeRoots } from '$lib/moveOrphans';
 
 export { fenKey, STARTING_FEN };
 
@@ -142,22 +143,6 @@ export function createBuildState(params: CreateBuildStateParams) {
 	});
 
 	// ── Helpers ──────────────────────────────────────────────────────────────
-
-	// Collect all normalised FEN keys reachable from a given position.
-	function collectSubtreeFens(startFen: string): SvelteSet<string> {
-		const visited = new SvelteSet<string>();
-		const queue = [startFen];
-		while (queue.length > 0) {
-			const fen = queue.shift()!;
-			const key = fenKey(fen);
-			if (visited.has(key)) continue;
-			visited.add(key);
-			for (const child of movesFromFen.get(key) ?? []) {
-				queue.push(child.toFen);
-			}
-		}
-		return visited;
-	}
 
 	// Replay a sequence of SAN moves from the starting position.
 	function replayLine(sans: string[]): void {
@@ -395,22 +380,12 @@ export function createBuildState(params: CreateBuildStateParams) {
 
 	// ── Deletion ─────────────────────────────────────────────────────────────
 
-	// Count how many moves exist in the subtree rooted at a given position.
-	function countSubtreeMoves(rootFen: string): number {
-		let count = 0;
-		const queue = [rootFen];
-		const visited = new SvelteSet<string>();
-		while (queue.length > 0) {
-			const fen = queue.shift()!;
-			const key = fenKey(fen);
-			if (visited.has(key)) continue;
-			visited.add(key);
-			for (const child of movesFromFen.get(key) ?? []) {
-				count++;
-				queue.push(child.toFen);
-			}
-		}
-		return count;
+	// Ids of the moves that deleting `move` would remove besides itself: those no
+	// longer reachable from the root of the repertoire. A line that can also be
+	// reached another way (transposition) stays. Same rule as DELETE /api/moves/[id].
+	function orphanedByDeleting(move: RepertoireMove): number[] {
+		const after = moves.filter((m) => m.id !== move.id);
+		return findOrphanedMoveIds(moves, after, treeRoots(startFen, move.fromFen));
 	}
 
 	function confirmDelete(move: RepertoireMove): void {
@@ -440,15 +415,22 @@ export function createBuildState(params: CreateBuildStateParams) {
 				return;
 			}
 
-			const deletedFens = collectSubtreeFens(move.toFen);
+			// The server says exactly which moves it removed (the move and the lines
+			// only it led to). Mirror that, rather than recomputing it here.
+			const result = (await res.json()) as { deletedIds?: number[] };
+			const deletedIds = new SvelteSet<number>(result.deletedIds ?? []);
+			deletedIds.add(move.id);
 
-			moves = moves.filter((m) => {
-				if (m.id === move.id) return false;
-				if (deletedFens.has(fenKey(m.fromFen))) return false;
-				return true;
-			});
+			// Positions that no longer lead anywhere: the deleted move's destination and
+			// the start of every other deleted move.
+			const gonePositions = new SvelteSet<string>([fenKey(move.toFen)]);
+			for (const m of moves) {
+				if (m.id !== move.id && deletedIds.has(m.id)) gonePositions.add(fenKey(m.fromFen));
+			}
 
-			if (fenKey(currentFen) === fenKey(move.toFen) || deletedFens.has(fenKey(currentFen))) {
+			moves = moves.filter((m) => !deletedIds.has(m.id));
+
+			if (gonePositions.has(fenKey(currentFen))) {
 				const entryIdx = navHistory.findIndex((e) => e.toFen === move.toFen);
 				if (entryIdx >= 0) {
 					navHistory = navHistory.slice(0, entryIdx);
@@ -772,7 +754,7 @@ export function createBuildState(params: CreateBuildStateParams) {
 		},
 		get pendingDeleteSubtreeCount() {
 			if (!pendingDelete) return 0;
-			return countSubtreeMoves(pendingDelete.toFen);
+			return orphanedByDeleting(pendingDelete).length;
 		},
 
 		// Actions

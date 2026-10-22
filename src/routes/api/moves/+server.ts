@@ -21,6 +21,7 @@ import { db } from '$lib/db';
 import { repertoire, userMove, userRepertoireMove } from '$lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { fenKey } from '$lib/fen';
+import { lockRepertoire } from '$lib/server/repertoire-lock';
 
 // ── GET ────────────────────────────────────────────────────────────────────────
 
@@ -107,47 +108,46 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 		throw error(400, 'Invalid FEN or move');
 	}
 
-	if (isUserTurn) {
-		// User can have at most one move per position.
-		// Check whether a move from this position already exists.
-		const [existing] = await db
-			.select()
-			.from(userMove)
-			.where(and(eq(userMove.repertoireId, repertoireId), eq(userMove.fromFen, fromFen)));
+	// Check, then save, inside one transaction that first locks the repertoire.
+	// Without the lock, two simultaneous saves (two tabs, a double click) both find
+	// nothing and both insert: two moves from one position, two drill cards.
+	// The move and (for the user's own moves) its SR card are written together so
+	// both succeed or roll back. Opponent moves are NOT drilled: you need to know
+	// your own responses, not predict every move your opponent might make.
+	const outcome = await db.transaction(async (tx) => {
+		if (!(await lockRepertoire(tx, repertoireId))) return { kind: 'gone' } as const;
 
-		if (existing) {
-			if (existing.san === san) {
-				// The exact same move is already saved — idempotent, return it.
-				return json(existing);
+		if (isUserTurn) {
+			// User can have at most one move per position.
+			const [existing] = await tx
+				.select()
+				.from(userMove)
+				.where(and(eq(userMove.repertoireId, repertoireId), eq(userMove.fromFen, fromFen)));
+
+			if (existing) {
+				// The exact same move is already saved: idempotent, return it.
+				if (existing.san === san) return { kind: 'existing', move: existing } as const;
+				// A different move already exists at this position: signal conflict.
+				// The client uses this to show a warning and snap the board back.
+				return { kind: 'conflict', existing } as const;
 			}
-			// A different move already exists at this position — signal conflict.
-			// The client uses this to show a warning and snap the board back.
-			return json({ error: 'A move already exists from this position', existing }, { status: 409 });
-		}
-	} else {
-		// Opponent's turn — multiple moves allowed, but no exact duplicates.
-		const [existing] = await db
-			.select()
-			.from(userMove)
-			.where(
-				and(
-					eq(userMove.repertoireId, repertoireId),
-					eq(userMove.fromFen, fromFen),
-					eq(userMove.san, san)
-				)
-			);
+		} else {
+			// Opponent's turn: multiple moves allowed, but no exact duplicates.
+			const [existing] = await tx
+				.select()
+				.from(userMove)
+				.where(
+					and(
+						eq(userMove.repertoireId, repertoireId),
+						eq(userMove.fromFen, fromFen),
+						eq(userMove.san, san)
+					)
+				);
 
-		if (existing) {
-			// Already exists — idempotent, return it.
-			return json(existing);
+			// Already exists: idempotent, return it.
+			if (existing) return { kind: 'existing', move: existing } as const;
 		}
-	}
 
-	// Save the move and (for user's own moves) create its SR card in a single
-	// transaction so both writes either succeed or roll back together.
-	// Opponent moves are NOT drilled — you need to know your own responses,
-	// not predict every move your opponent might make.
-	const savedMove = await db.transaction(async (tx) => {
 		const [move] = await tx
 			.insert(userMove)
 			.values({
@@ -183,8 +183,16 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 			});
 		}
 
-		return move;
+		return { kind: 'created', move } as const;
 	});
 
-	return json(savedMove, { status: 201 });
+	if (outcome.kind === 'gone') throw error(404, 'Repertoire not found');
+	if (outcome.kind === 'conflict') {
+		return json(
+			{ error: 'A move already exists from this position', existing: outcome.existing },
+			{ status: 409 }
+		);
+	}
+	if (outcome.kind === 'existing') return json(outcome.move);
+	return json(outcome.move, { status: 201 });
 };

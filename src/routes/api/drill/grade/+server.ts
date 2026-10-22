@@ -6,12 +6,19 @@
 //
 // The card must belong to the requesting user — we verify ownership before
 // touching anything.
+//
+// A card can only be graded once it is due. "Drill all" and subtree drills let
+// the user practice cards that are not due yet, but grading one would add an
+// FSRS review (and a review_log row) that no real recall justifies, skewing
+// intervals and the retention charts. The due check is part of the UPDATE's
+// WHERE clause rather than a separate read, so two simultaneous grades of the
+// same card cannot both succeed: the loser gets a 409 `not_due`.
 
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { db } from '$lib/db';
 import { userRepertoireMove, reviewLog } from '$lib/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, or, isNull, lte } from 'drizzle-orm';
 import { gradeCard, buildReviewLogEntry, Rating } from '$lib/fsrs';
 import { loadFsrsConfig } from '$lib/server/fsrs-config';
 
@@ -52,10 +59,32 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 
 	// Write the new state back to the database, and append the review log
 	// entry, in the same transaction so the two never drift out of sync.
-	await db.transaction(async (tx) => {
-		await tx.update(userRepertoireMove).set(updated).where(eq(userRepertoireMove.id, cardId));
-		await tx.insert(reviewLog).values({ userId, cardId, ...logEntry });
+	// Returns the new log entry's id, or null when the card was not due.
+	const logId = await db.transaction(async (tx) => {
+		const rows = await tx
+			.update(userRepertoireMove)
+			.set(updated)
+			.where(
+				and(
+					eq(userRepertoireMove.id, cardId),
+					eq(userRepertoireMove.userId, userId),
+					or(isNull(userRepertoireMove.due), lte(userRepertoireMove.due, now))
+				)
+			)
+			.returning({ id: userRepertoireMove.id });
+		if (rows.length === 0) return null;
+
+		const [log] = await tx
+			.insert(reviewLog)
+			.values({ userId, cardId, ...logEntry })
+			.returning({ id: reviewLog.id });
+		return log.id;
 	});
 
-	return json({ updated: true, due: updated.due });
+	if (logId === null) {
+		return json({ updated: false, reason: 'not_due' }, { status: 409 });
+	}
+
+	// logId lets the client undo exactly this grade (see /api/drill/undo).
+	return json({ updated: true, due: updated.due, logId });
 };

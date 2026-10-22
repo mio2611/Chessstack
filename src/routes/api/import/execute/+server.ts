@@ -26,48 +26,11 @@ import { db } from '$lib/db';
 import { repertoire, userMove, userRepertoireMove } from '$lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { fenKey, STARTING_FEN } from '$lib/fen';
+import { replaceUserMove } from '$lib/server/replace-move';
+import { lockRepertoire } from '$lib/server/repertoire-lock';
 
 // Transaction type extracted from db.transaction() callback parameter
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
-
-// Recursively deletes all moves reachable from startFen in the given repertoire,
-// including their SR cards. Works within a Drizzle transaction.
-// Mirrors the deleteSubtree logic in DELETE /api/moves/[id].
-async function deleteSubtreeInTx(
-	tx: Transaction,
-	userId: number,
-	repertoireId: number,
-	startFen: string
-): Promise<void> {
-	const children = (await tx
-		.select()
-		.from(userMove)
-		.where(and(eq(userMove.repertoireId, repertoireId), eq(userMove.fromFen, startFen)))) as {
-		id: number;
-		toFen: string;
-		san: string;
-	}[];
-
-	for (const child of children) {
-		// Recurse into the child's subtree before deleting the child itself.
-		await deleteSubtreeInTx(tx, userId, repertoireId, child.toFen);
-
-		// Delete the SR card for this move if one exists.
-		await tx
-			.delete(userRepertoireMove)
-			.where(
-				and(
-					eq(userRepertoireMove.userId, userId),
-					eq(userRepertoireMove.repertoireId, repertoireId),
-					eq(userRepertoireMove.fromFen, startFen),
-					eq(userRepertoireMove.san, child.san)
-				)
-			);
-
-		// Delete the move row itself.
-		await tx.delete(userMove).where(eq(userMove.id, child.id));
-	}
-}
 
 // fromFen -> (san -> toFen), for every move currently stored in a repertoire.
 type EdgeMap = Map<string, Map<string, string>>;
@@ -201,6 +164,10 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 
 	// Single transaction for all writes
 	const result = await db.transaction(async (tx) => {
+		// Serialise with every other writer of this repertoire: what is stored is read
+		// below, and must not change under this import.
+		if (!(await lockRepertoire(tx, repertoireId))) throw error(404, 'Repertoire not found');
+
 		let inserted = 0;
 		let replaced = 0;
 		let skipped = 0;
@@ -249,34 +216,20 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 						// Different move exists — check if user chose to replace it
 						const replaceKey = fenKey(vm.fromFen) + '|' + vm.san;
 						if (replacementSet.has(replaceKey)) {
-							// Before replacing, delete the old move's downstream subtree.
-							// When we change this move's san/toFen, children hanging off
-							// the OLD toFen become orphaned — unreachable from the tree
-							// root. We must remove them (and their SR cards) now.
-							await deleteSubtreeInTx(tx, user.id, repertoireId, existing.toFen);
-
-							// User chose this PGN move over the existing one — replace
-							await tx
-								.update(userMove)
-								.set({
-									san: vm.san,
-									toFen: vm.toFen,
-									source: 'PGN_IMPORT',
-									...(vm.notes != null ? { notes: vm.notes } : {})
-								})
-								.where(eq(userMove.id, existing.id));
-
-							// Update the SR card's SAN to match
-							await tx
-								.update(userRepertoireMove)
-								.set({ san: vm.san })
-								.where(
-									and(
-										eq(userRepertoireMove.userId, user.id),
-										eq(userRepertoireMove.repertoireId, repertoireId),
-										eq(userRepertoireMove.fromFen, vm.fromFen)
-									)
-								);
+							// User chose this PGN move over the existing one. It gets a fresh
+							// drill card and the PGN's note (or none), and the lines only the old
+							// move led to are removed; lines reachable another way are kept.
+							await replaceUserMove(tx, user.id, repertoireId, {
+								moveId: existing.id,
+								fromFen: vm.fromFen,
+								oldSan: existing.san,
+								newSan: vm.san,
+								newToFen: vm.toFen,
+								source: 'PGN_IMPORT',
+								notes: vm.notes,
+								startFen: rep.startFen,
+								now: new Date()
+							});
 
 							replaced++;
 

@@ -12,6 +12,7 @@ services:
       - DEFAULT_PASSWORD=changeme
       - REGISTRATION_MODE=invite # change to 'open' if you want anyone to be able to register an account
       - GAME_IMPORT_INTERVAL_MINUTES=0 # How often the app fetches new games from Lichess & Chess.com.
+      - BODY_SIZE_LIMIT=10485760 # 10 MB. Default is 512 kB, too small for large PGN imports.
     depends_on:
       postgres:
         condition: service_healthy

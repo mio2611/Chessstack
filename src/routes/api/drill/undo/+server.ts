@@ -3,12 +3,18 @@
 // When a user grades a card and immediately regrets it (before clicking "Next"),
 // the client sends back the snapshot of FSRS fields it captured before grading.
 // We validate ownership and write those fields back, effectively undoing the grade.
+//
+// The grade also appended a review_log row, which the retention charts read, so
+// undoing must delete that exact row (identified by the logId /api/drill/grade
+// returned), in the same transaction as the restore. Two cases are refused:
+// the row no longer exists (already undone, or never written) and a newer
+// review of the same card exists (the snapshot would overwrite it).
 
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { db } from '$lib/db';
-import { userRepertoireMove } from '$lib/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { userRepertoireMove, reviewLog } from '$lib/db/schema';
+import { eq, and, gt } from 'drizzle-orm';
 
 export const POST: RequestHandler = async ({ locals, request }) => {
 	if (!locals.user) throw error(401, 'Not authenticated');
@@ -20,9 +26,10 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 		throw error(400, 'Invalid JSON body');
 	}
 
-	const { cardId, previousState } = body;
+	const { cardId, previousState, logId } = body;
 
 	if (typeof cardId !== 'number') throw error(400, 'cardId must be a number');
+	if (typeof logId !== 'number') throw error(400, 'logId must be a number');
 	if (!previousState || typeof previousState !== 'object') {
 		throw error(400, 'previousState is required');
 	}
@@ -74,8 +81,30 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 
 	if (!card) throw error(404, 'Card not found');
 
-	// Restore the pre-grade FSRS fields using validated values.
-	await db.update(userRepertoireMove).set(validated).where(eq(userRepertoireMove.id, cardId));
+	const userId = locals.user.id;
+
+	await db.transaction(async (tx) => {
+		const [entry] = await tx
+			.select({ id: reviewLog.id })
+			.from(reviewLog)
+			.where(
+				and(eq(reviewLog.id, logId), eq(reviewLog.cardId, cardId), eq(reviewLog.userId, userId))
+			);
+		if (!entry) throw error(404, 'Review entry not found');
+
+		const [newer] = await tx
+			.select({ id: reviewLog.id })
+			.from(reviewLog)
+			.where(
+				and(eq(reviewLog.cardId, cardId), eq(reviewLog.userId, userId), gt(reviewLog.id, logId))
+			)
+			.limit(1);
+		if (newer) throw error(409, 'Card was reviewed again since this grade');
+
+		await tx.delete(reviewLog).where(eq(reviewLog.id, logId));
+		// Restore the pre-grade FSRS fields using validated values.
+		await tx.update(userRepertoireMove).set(validated).where(eq(userRepertoireMove.id, cardId));
+	});
 
 	return json({ restored: true });
 };

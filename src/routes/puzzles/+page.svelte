@@ -253,20 +253,24 @@
 
 	// ── User move handling ─────────────────────────────────────────────────────
 
-	function handleMove(from: string, to: string, san: string, newFen: string, isCapture: boolean) {
+	function handleMove(
+		from: string,
+		to: string,
+		san: string,
+		newFen: string,
+		isCapture: boolean,
+		promotion?: string
+	) {
 		if (phase !== 'waiting' || !currentPuzzle) return;
 
-		// Check if this move matches the expected solution move
+		// Compare the full UCI move, promotion piece included: e7e8n is not e7e8q.
 		const expectedUci = solutionMoves[moveIndex];
-		const { from: expFrom, to: expTo, promotion: expPromo } = parseUci(expectedUci);
+		const moveUci = from + to + (promotion ?? '');
 
-		// Normalize: compare from/to squares. For promotions, also check the piece.
-		const moveUci = from + to;
-		const expectedBase = expFrom + expTo;
-
-		// For promotion moves, chess.js auto-promotes to queen via ChessBoard,
-		// so also check if promotion matches
-		const isCorrect = moveUci === expectedBase && (!expPromo || expPromo === 'q'); // ChessBoard auto-promotes to queen
+		// Like Lichess, any move that checkmates solves the puzzle, even when it
+		// is not the move in the stored solution (a puzzle can have several mates).
+		const isMate = new Chess(newFen).isCheckmate();
+		const isCorrect = isMate || moveUci === expectedUci;
 
 		if (isCorrect) {
 			// Correct move!
@@ -281,8 +285,8 @@
 			moveIndex++;
 			hintShapes = [];
 
-			// Check if there are more moves in the solution
-			if (moveIndex >= solutionMoves.length) {
+			// Check if there are more moves in the solution (a mate ends the puzzle)
+			if (isMate || moveIndex >= solutionMoves.length) {
 				// Puzzle solved!
 				phase = 'solved';
 				flashColor = 'green';
