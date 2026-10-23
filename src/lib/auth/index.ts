@@ -20,8 +20,14 @@ export const SESSION_COOKIE_NAME = 'chessstack_session';
 // browser will silently reject the cookie.
 export const SECURE_COOKIE = (process.env.ORIGIN ?? '').startsWith('https://');
 
-// Sessions are valid for 30 days. After this, the user must log in again.
+// Sessions are valid for 30 days. The expiry slides: whenever a request arrives
+// with less than half of that time left, the session is extended by a full
+// 30 days (see validateSession). A session therefore only expires after 30
+// days without use, not 30 days after login.
 const SESSION_DURATION_DAYS = 30;
+
+// Cookie lifetime in seconds, kept in step with the session lifetime.
+export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * SESSION_DURATION_DAYS;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // createSession(userId)
@@ -56,7 +62,9 @@ export async function createSession(userId: number): Promise<string> {
 // session table from accumulating stale rows over time.
 // ─────────────────────────────────────────────────────────────────────────────
 
-export async function validateSession(token: string): Promise<{ userId: number } | null> {
+export async function validateSession(
+	token: string
+): Promise<{ userId: number; renewed: boolean } | null> {
 	const [row] = await db.select().from(session).where(eq(session.id, token));
 
 	if (!row) {
@@ -70,7 +78,19 @@ export async function validateSession(token: string): Promise<{ userId: number }
 		return null;
 	}
 
-	return { userId: row.userId };
+	// Sliding expiry: once less than half of the lifetime remains, push the
+	// expiry out by a full lifetime. At most one write per half-lifetime.
+	// `renewed` tells the caller to refresh the browser cookie as well.
+	const now = Date.now();
+	const halfLifetimeMs = (SESSION_DURATION_DAYS * 24 * 60 * 60 * 1000) / 2;
+	if (row.expiresAt.getTime() - now < halfLifetimeMs) {
+		const expiresAt = new Date(now);
+		expiresAt.setDate(expiresAt.getDate() + SESSION_DURATION_DAYS);
+		await db.update(session).set({ expiresAt }).where(eq(session.id, token));
+		return { userId: row.userId, renewed: true };
+	}
+
+	return { userId: row.userId, renewed: false };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
