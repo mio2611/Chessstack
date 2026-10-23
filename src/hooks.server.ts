@@ -12,9 +12,15 @@
 //   5. If the user is not authenticated and the route requires auth, redirects to /login
 //   6. If the user IS authenticated and is trying to visit /login, redirects to /
 
-import { redirect } from '@sveltejs/kit';
+import { json, redirect } from '@sveltejs/kit';
 import type { Handle, HandleServerError } from '@sveltejs/kit';
-import { validateSession, deleteSession, SESSION_COOKIE_NAME, SECURE_COOKIE } from '$lib/auth';
+import {
+	validateSession,
+	deleteSession,
+	SESSION_COOKIE_NAME,
+	SESSION_MAX_AGE_SECONDS,
+	SECURE_COOKIE
+} from '$lib/auth';
 import { db, dbReady } from '$lib/db';
 import { user, userSettings } from '$lib/db/schema';
 import { eq } from 'drizzle-orm';
@@ -77,6 +83,18 @@ export const handle: Handle = async ({ event, resolve }) => {
 						username: foundUser.username,
 						role: foundUser.role
 					};
+
+					// The session expiry just slid forward: extend the cookie too,
+					// otherwise the browser would drop it at the original date.
+					if (sessionData.renewed) {
+						event.cookies.set(SESSION_COOKIE_NAME, token, {
+							path: '/',
+							httpOnly: true,
+							sameSite: 'lax',
+							secure: SECURE_COOKIE,
+							maxAge: SESSION_MAX_AGE_SECONDS
+						});
+					}
 				}
 			}
 		} else {
@@ -94,8 +112,19 @@ export const handle: Handle = async ({ event, resolve }) => {
 		(route) => pathname === route || pathname.startsWith(route + '/')
 	);
 
-	// Unauthenticated user trying to access a protected route → send to login.
+	// API calls get a JSON status code instead of a redirect. fetch() follows a
+	// redirect silently and ends up with the HTML login page and a 200, so an
+	// expired session made saves fail without the client noticing. The logout
+	// endpoint is excluded: it is posted by a plain HTML form (page navigation),
+	// where a redirect is the right answer.
+	const isJsonApi = pathname.startsWith('/api/') && pathname !== '/api/auth/logout';
+
+	// Unauthenticated user trying to access a protected route → 401 for the API,
+	// redirect to login for pages.
 	if (!event.locals.user && !isPublicRoute) {
+		if (isJsonApi) {
+			return json({ error: 'Not authenticated' }, { status: 401 });
+		}
 		redirect(302, '/login');
 	}
 
@@ -104,9 +133,13 @@ export const handle: Handle = async ({ event, resolve }) => {
 		redirect(302, '/');
 	}
 
-	// Admin-only routes — non-admins get redirected to the dashboard.
+	// Admin-only routes — non-admins get a 403 for the API and are redirected to
+	// the dashboard for pages.
 	if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin')) {
 		if (!event.locals.user || event.locals.user.role !== 'admin') {
+			if (isJsonApi) {
+				return json({ error: 'Forbidden' }, { status: 403 });
+			}
 			redirect(302, '/');
 		}
 	}

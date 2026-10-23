@@ -169,6 +169,10 @@
 	// True while a grade fetch is in-flight — prevents double-grading.
 	let grading = $state(false);
 
+	// True when a grade was rejected with 401 (session expired). The card is NOT
+	// advanced in that case, so the grade is not silently lost.
+	let sessionExpired = $state(false);
+
 	// Hint state: whether the user asked for a hint this card, and which
 	// square to highlight (the "from" square of the correct move).
 	let hintUsed = $state(false);
@@ -881,8 +885,10 @@
 
 	// Submit the grade for the current card to the server and update stats.
 	// Does NOT advance to the next card — call advanceToNext() separately.
-	async function submitGrade(rating: number): Promise<void> {
-		if (grading || !currentCard || !isCardGradable(currentCard)) return;
+	// Resolves to false when the grade was rejected because the session expired:
+	// callers must then NOT advance to the next card.
+	async function submitGrade(rating: number): Promise<boolean> {
+		if (grading || !currentCard || !isCardGradable(currentCard)) return true;
 		grading = true;
 
 		const wasCorrect = phase === 'correct';
@@ -936,6 +942,13 @@
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ cardId: currentCard.id, rating })
 			});
+			// 401: the session expired. Stop here and tell the user instead of
+			// letting the card pass as if it had been graded.
+			if (res.status === 401) {
+				sessionExpired = true;
+				grading = false;
+				return false;
+			}
 			// 409 (not_due): the card was already graded elsewhere (another tab).
 			// Nothing was recorded, which is the right outcome, not an error.
 			if (res.status !== 409) {
@@ -957,6 +970,7 @@
 			if (wasCorrect) correctCount++;
 		}
 
+		sessionExpired = false;
 		grading = false;
 		awaitingNext = true;
 
@@ -968,6 +982,8 @@
 				body: JSON.stringify({ tutorialStep: 5 })
 			}).then(() => invalidateAll());
 		}
+
+		return true;
 	}
 
 	// Undo the last grade — restore the card's FSRS state and re-show grade buttons.
@@ -1034,7 +1050,8 @@
 	async function handleNext(): Promise<void> {
 		if (!awaitingNext) {
 			// Not yet graded — this is an incorrect or hint-used card.
-			await submitGrade(1); // Rating.Again
+			const graded = await submitGrade(1); // Rating.Again
+			if (!graded) return; // Session expired: stay on this card.
 		}
 		await advanceToNext();
 	}
@@ -1889,6 +1906,14 @@
 				</div>
 			{/if}
 
+			{#if sessionExpired}
+				<p class="session-expired" role="alert">
+					Your session has expired, so this grade was not saved.
+					<a href="/login" target="_blank" rel="noopener">Sign in again</a> in a new tab, then grade the
+					card again.
+				</p>
+			{/if}
+
 			{#if hintUsed}
 				<!-- Hint was used — will be graded Again when Next is clicked. -->
 				<p class="auto-advance-hint">
@@ -2734,6 +2759,20 @@
 	.next-btn kbd {
 		font-size: 0.6rem;
 		opacity: 0.5;
+	}
+
+	.session-expired {
+		margin: 0 0 var(--space-2);
+		padding: var(--space-2) var(--space-3);
+		border: 1px solid var(--color-danger);
+		border-radius: var(--radius-md, 6px);
+		color: var(--color-danger);
+		font-size: 0.85rem;
+	}
+
+	.session-expired a {
+		color: inherit;
+		text-decoration: underline;
 	}
 
 	.undo-btn {
