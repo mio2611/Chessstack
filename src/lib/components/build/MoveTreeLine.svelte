@@ -75,7 +75,7 @@
 			onclick={() => onNavigateToLine(n.pathSans)}>{n.san}</button
 		>
 		{#if n.isTransposition}
-			<span class="tree-transposition" title="Transpose vers une ligne déjà affichée">⇥</span>
+			<span class="tree-transposition" title="Transposes into a line already shown">⇄</span>
 		{/if}
 		{#if n.children.length > 1}
 			{#each n.children.slice(1) as branch (branch.toFenKey)}
