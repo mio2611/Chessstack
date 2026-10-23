@@ -10,7 +10,12 @@ import { db } from '$lib/db';
 import { user } from '$lib/db/schema';
 import { eq } from 'drizzle-orm';
 import bcrypt from 'bcryptjs';
-import { createSession, SESSION_COOKIE_NAME, SECURE_COOKIE } from '$lib/auth';
+import {
+	createSession,
+	SESSION_COOKIE_NAME,
+	SESSION_MAX_AGE_SECONDS,
+	SECURE_COOKIE
+} from '$lib/auth';
 
 const REGISTRATION_MODE = process.env.REGISTRATION_MODE ?? 'invite';
 
@@ -103,7 +108,7 @@ export const actions: Actions = {
 			httpOnly: true,
 			sameSite: 'lax',
 			secure: SECURE_COOKIE,
-			maxAge: 60 * 60 * 24 * 30
+			maxAge: SESSION_MAX_AGE_SECONDS
 		});
 
 		redirect(303, '/');

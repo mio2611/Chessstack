@@ -13,7 +13,12 @@ import { db } from '$lib/db';
 import { user } from '$lib/db/schema';
 import { eq } from 'drizzle-orm';
 import bcrypt from 'bcryptjs';
-import { createSession, SESSION_COOKIE_NAME, SECURE_COOKIE } from '$lib/auth';
+import {
+	createSession,
+	SESSION_COOKIE_NAME,
+	SESSION_MAX_AGE_SECONDS,
+	SECURE_COOKIE
+} from '$lib/auth';
 
 const REGISTRATION_MODE = process.env.REGISTRATION_MODE ?? 'invite';
 
@@ -62,13 +67,14 @@ export const actions: Actions = {
 		//                   Protects against CSRF attacks from other websites.
 		// path: '/'       — Cookie applies to all routes, not just /login.
 		// secure           — Derived from ORIGIN env var (https = secure cookies).
-		// maxAge: 30 days — How long the cookie lives in the browser.
+		// maxAge: 30 days — How long the cookie lives in the browser (refreshed by
+		//                   hooks.server.ts while the session is in use).
 		cookies.set(SESSION_COOKIE_NAME, token, {
 			path: '/',
 			httpOnly: true,
 			sameSite: 'lax',
 			secure: SECURE_COOKIE,
-			maxAge: 60 * 60 * 24 * 30 // 30 days in seconds
+			maxAge: SESSION_MAX_AGE_SECONDS
 		});
 
 		// Redirect to the dashboard. The browser follows this automatically.
