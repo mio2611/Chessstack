@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { PageData } from './$types';
 	import { invalidateAll, goto } from '$app/navigation';
-	import { resolveRoute } from '$app/paths';
+	import { resolve } from '$app/paths';
 	import { onDestroy } from 'svelte';
 	import ChessBoard from '$lib/components/ChessBoard.svelte';
 	import { tutorialStep } from '$lib/stores/tutorial';
@@ -475,7 +475,7 @@
 			body: JSON.stringify({ tutorialStep: 1 })
 		});
 		await invalidateAll();
-		await goto(resolveRoute('/build'));
+		await goto(resolve('/build'));
 	}
 </script>
 

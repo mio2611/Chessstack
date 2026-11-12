@@ -3,7 +3,7 @@
 	import OnboardingWelcome from '$lib/components/OnboardingWelcome.svelte';
 	import OpeningName from '$lib/components/OpeningName.svelte';
 	import { formatLine } from '$lib/gaps';
-	import { base } from '$app/paths';
+	import { resolve } from '$app/paths';
 	import { invalidateAll } from '$app/navigation';
 	import { Chess } from 'chess.js';
 
@@ -15,7 +15,7 @@
 
 	async function updateGapThreshold(e: Event) {
 		const value = Number((e.target as HTMLSelectElement).value);
-		await fetch(`${base}/api/settings`, {
+		await fetch(resolve('/api/settings'), {
 			method: 'PATCH',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ gapMinGames: value })
@@ -25,7 +25,7 @@
 
 	async function updateGapMinPopularity(e: Event) {
 		const value = Number((e.target as HTMLSelectElement).value);
-		await fetch(`${base}/api/settings`, {
+		await fetch(resolve('/api/settings'), {
 			method: 'PATCH',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ gapMinPopularityPct: value })
@@ -86,9 +86,23 @@
 
 	// ── To do (same counts as the top-menu badges) ──────────────────────
 	const todoItems = $derived([
-		{ href: `${base}/drill`, label: 'Drill', count: data.todo.drill },
-		{ href: `${base}/endgame`, label: 'Endgames', count: data.todo.endgame },
-		{ href: `${base}/anti-gaffe`, label: 'Blunders', count: data.todo.antiGaffe }
+		{
+			href: resolve('/drill'),
+			label: 'Drill',
+			count: data.todo.drill
+		},
+
+		{
+			href: resolve('/endgame'),
+			label: 'Endgames',
+			count: data.todo.endgame
+		},
+
+		{
+			href: resolve('/anti-gaffe'),
+			label: 'Blunders',
+			count: data.todo.antiGaffe
+		}
 	]);
 
 	// ── Puzzle Goal state ───────────────────────────────────────────────
@@ -109,7 +123,7 @@
 		if (!goalCountInput || goalCountInput < 1) return;
 		savingGoal = true;
 		try {
-			await fetch(`${base}/api/settings`, {
+			await fetch(resolve('/api/settings'), {
 				method: 'PATCH',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
@@ -127,7 +141,7 @@
 	async function clearGoal() {
 		savingGoal = true;
 		try {
-			await fetch(`${base}/api/settings`, {
+			await fetch(resolve('/api/settings'), {
 				method: 'PATCH',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ puzzleGoalCount: null })
@@ -266,7 +280,7 @@
 					{#if met}
 						<div class="widget-hint goal-complete-hint">Goal met {freqLabel}!</div>
 					{:else}
-						<a href="{base}/puzzles" class="goal-link">Solve puzzles</a>
+						<a href={resolve('/puzzles')} class="goal-link">Solve puzzles</a>
 					{/if}
 
 					<button class="goal-edit-btn" onclick={() => (editingGoal = true)}>Edit</button>
@@ -297,16 +311,15 @@
 								{savingGoal ? 'Saving…' : 'Set Goal'}
 							</button>
 							{#if data.puzzleGoal}
-								<button class="goal-clear-btn" onclick={clearGoal} disabled={savingGoal}>
-									Clear
-								</button>
+								<button class="goal-clear-btn" onclick={clearGoal} disabled={savingGoal}
+									>Clear</button
+								>
+
 								<button
 									class="goal-clear-btn"
 									onclick={() => (editingGoal = false)}
-									disabled={savingGoal}
+									disabled={savingGoal}>Cancel</button
 								>
-									Cancel
-								</button>
 							{/if}
 						</div>
 					</div>
@@ -475,9 +488,10 @@
 											>
 										{/if}
 									</div>
-									<a href="{base}/build?line={encodeURIComponent(gap.line)}" class="gap-link">
-										Build
-									</a>
+
+									<a href="{resolve('/build')}?line={encodeURIComponent(gap.line)}" class="gap-link"
+										>Build</a
+									>
 								</li>
 							{/each}
 						</ul>

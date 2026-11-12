@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { PageData } from './$types';
-	import { base } from '$app/paths';
+	import { resolve } from '$app/paths';
 	import { invalidateAll } from '$app/navigation';
 	import ChessBoard from '$lib/components/ChessBoard.svelte';
 	import ResizableBoard from '$lib/components/ResizableBoard.svelte';
@@ -13,11 +13,7 @@
 	import type { AggregatedMove, WorkerParseMessage, WorkerOutboundMessage } from '$lib/prep/types';
 
 	let { data }: { data: PageData } = $props();
-
-	const s = createPrepState({
-		getPrepId: () => data.prep.id,
-		getBaseUrl: () => base
-	});
+	const s = createPrepState({ getPrepId: () => data.prep.id });
 
 	// Sync state when page data loads
 	$effect(() => {
@@ -125,7 +121,7 @@
 
 		try {
 			// Step 1: Fetch PGNs using selected time window
-			const fetchRes = await fetch(`${base}/api/prep/${data.prep.id}/refresh`, {
+			const fetchRes = await fetch(resolve('/api/prep/[id]/refresh', { id: String(data.prep.id) }), {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
@@ -194,7 +190,7 @@
 			const totalChunks = Math.ceil(allMoves.length / CHUNK_SIZE);
 
 			// Phase 1: delete old data and update metadata
-			const startRes = await fetch(`${base}/api/prep/${data.prep.id}/refresh`, {
+			const startRes = await fetch(resolve('/api/prep/[id]/refresh', { id: String(data.prep.id) }), {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
@@ -214,7 +210,7 @@
 				const chunkNum = Math.floor(i / CHUNK_SIZE) + 1;
 				refreshStatus = `Saving moves... ${chunkNum}/${totalChunks}`;
 
-				const batchRes = await fetch(`${base}/api/prep/${data.prep.id}/refresh`, {
+				const batchRes = await fetch(resolve('/api/prep/[id]/refresh', { id: String(data.prep.id) }), {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
 					body: JSON.stringify({ mode: 'merge-batch', moves: chunk })
@@ -271,7 +267,7 @@
 		addReplacements.clear();
 
 		try {
-			const res = await fetch(`${base}/api/prep/${data.prep.id}/add-to-repertoire`, {
+			const res = await fetch(resolve('/api/prep/[id]/add-to-repertoire', { id: String(data.prep.id) }), {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
@@ -308,7 +304,7 @@
 			.map((c) => ({ fromFen: c.fromFen, san: c.prepMove }));
 
 		try {
-			const res = await fetch(`${base}/api/prep/${data.prep.id}/add-to-repertoire`, {
+			const res = await fetch(resolve('/api/prep/[id]/add-to-repertoire', { id: String(data.prep.id) }), {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
@@ -352,7 +348,7 @@
 		exportError = '';
 
 		try {
-			const res = await fetch(`${base}/api/prep/${data.prep.id}/export`, {
+			const res = await fetch(resolve('/api/prep/[id]/export', { id: String(data.prep.id) }), {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ color: s.activeColor })
@@ -394,9 +390,10 @@
 					with your prep moves. You can then drill it like any other repertoire.
 				</p>
 				<div class="modal-actions">
-					<button class="submit-btn" onclick={exportAsRepertoire} disabled={exporting}>
-						{exporting ? 'Exporting...' : 'Export'}
-					</button>
+					<button class="submit-btn" onclick={exportAsRepertoire} disabled={exporting}
+						>{exporting ? 'Exporting...' : 'Export'}</button
+					>
+
 					<button
 						class="cancel-btn"
 						onclick={() => (showExportConfirm = false)}
@@ -431,10 +428,9 @@
 						onclick={() => {
 							showRefreshConfirm = false;
 							refreshGames();
-						}}
+						}}>Refresh</button
 					>
-						Refresh
-					</button>
+
 					<button class="cancel-btn" onclick={() => (showRefreshConfirm = false)}>Cancel</button>
 				</div>
 			</div>
@@ -529,7 +525,7 @@
 	<!-- Three-column layout: Dashboard | Board | Move Panel -->
 	<div class="prep-workspace">
 		<div class="dashboard-col">
-			<a href="{base}/prep" class="back-link">&larr; All Preps</a>
+			<a href={resolve('/prep')} class="back-link">&larr; All Preps</a>
 			<h1 class="opponent-name">{data.prep.opponentName}</h1>
 			<div class="meta-line">
 				<span class="platform-tag">
@@ -599,13 +595,13 @@
 					<p class="refresh-status">{refreshStatus}</p>
 				{/if}
 
-				<button class="export-btn" onclick={() => (showExportConfirm = true)}>
-					Export as Repertoire
-				</button>
+				<button class="export-btn" onclick={() => (showExportConfirm = true)}
+					>Export as Repertoire</button
+				>
+
 				{#if matchingRepertoires.length > 0}
-					<button class="export-btn" onclick={() => (showAddModal = true)}>
-						Add to Repertoire
-					</button>
+					<button class="export-btn" onclick={() => (showAddModal = true)}>Add to Repertoire</button
+					>
 				{/if}
 
 				{#if exportResult}
@@ -627,10 +623,12 @@
 		<div class="board-col">
 			{#if s.conflictSan}
 				<div class="conflict-banner">
-					<span
-						>You already have <strong>{s.conflictSan}</strong> at this position. Delete it first to play
-						a different move.</span
-					>
+					<span>
+						You already have
+						<strong>{s.conflictSan}</strong>
+						at this position. Delete it first to play a different move.
+					</span>
+
 					<button class="dismiss-btn" onclick={() => s.dismissConflict()}>&times;</button>
 				</div>
 			{/if}
@@ -649,12 +647,13 @@
 
 			<!-- Navigation controls -->
 			<div class="nav-controls">
-				<button onclick={() => s.handleReset()} disabled={s.navHistory.length === 0} title="Reset">
-					&#x23EE;
-				</button>
-				<button onclick={() => s.handleUndo()} disabled={s.navHistory.length === 0} title="Back">
-					&#x25C0;
-				</button>
+				<button onclick={() => s.handleReset()} disabled={s.navHistory.length === 0} title="Reset"
+					>&#x23EE;</button
+				>
+
+				<button onclick={() => s.handleUndo()} disabled={s.navHistory.length === 0} title="Back"
+					>&#x25C0;</button
+				>
 			</div>
 
 			<!-- Current line display -->
@@ -677,6 +676,7 @@
 			{#if s.errorMsg}
 				<div class="error-banner">
 					<span>{s.errorMsg}</span>
+
 					<button class="dismiss-btn" onclick={() => s.dismissError()}>&times;</button>
 				</div>
 			{/if}

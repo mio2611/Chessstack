@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { PageData } from './$types';
 	import { goto } from '$app/navigation';
-	import { base, resolveRoute } from '$app/paths';
+	import { resolve } from '$app/paths';
 	import type { WorkerParseMessage, WorkerOutboundMessage, AggregatedMove } from '$lib/prep/types';
 
 	let { data }: { data: PageData } = $props();
@@ -44,7 +44,7 @@
 
 		try {
 			// Step 1: Fetch PGNs from server
-			const fetchRes = await fetch(`${base}/api/prep/fetch`, {
+			const fetchRes = await fetch(resolve('/api/prep/fetch'), {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
@@ -78,7 +78,7 @@
 			statusMessage = 'Saving prep...';
 
 			// Step 3: Create prep row (without moves — those are sent in chunks)
-			const createRes = await fetch(`${base}/api/prep`, {
+			const createRes = await fetch(resolve('/api/prep'), {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
@@ -109,7 +109,7 @@
 				const chunkNum = Math.floor(i / CHUNK_SIZE) + 1;
 				statusMessage = `Saving moves... ${chunkNum}/${totalChunks}`;
 
-				const batchRes = await fetch(`${base}/api/prep/${prep.id}/refresh`, {
+				const batchRes = await fetch(resolve('/api/prep/[id]/refresh', { id: String(prep.id) }), {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
 					body: JSON.stringify({ mode: 'merge-batch', moves: chunk })
@@ -121,7 +121,7 @@
 			}
 
 			// Step 4: Navigate to the new prep
-			await goto(resolveRoute('/prep/[id]', { id: String(prep.id) }));
+			await goto(resolve('/prep/[id]', { id: String(prep.id) }));
 		} catch (e) {
 			errorMessage = e instanceof Error ? e.message : String(e);
 			loading = false;
@@ -166,7 +166,7 @@
 
 	async function deletePrep(id: number) {
 		try {
-			const res = await fetch(`${base}/api/prep/${id}`, { method: 'DELETE' });
+			const res = await fetch(resolve('/api/prep/[id]', { id: String(id) }), { method: 'DELETE' });
 			if (!res.ok) throw new Error('Delete failed');
 			// Remove from local data to avoid full page reload
 			data.preps = data.preps.filter((p) => p.id !== id);
@@ -293,7 +293,7 @@
 	{:else}
 		<div class="prep-grid">
 			{#each data.preps as prep (prep.id)}
-				<a class="prep-card" href="{base}/prep/{prep.id}">
+				<a class="prep-card" href={resolve('/prep/[id]', { id: String(prep.id) })}>
 					<div class="prep-card-header">
 						<span class="opponent-name">{prep.opponentName}</span>
 						<span class="platform-badge" class:lichess={prep.platform === 'LICHESS'}>
@@ -314,10 +314,8 @@
 								e.stopPropagation();
 								deletingId = prep.id;
 							}}
-							title="Delete prep"
+							title="Delete prep">&times;</button
 						>
-							&times;
-						</button>
 					</div>
 				</a>
 			{/each}
@@ -332,9 +330,8 @@
 				<h3>Delete Prep</h3>
 				<p>Delete this opponent prep and all associated moves? This cannot be undone.</p>
 				<div class="modal-actions">
-					<button class="delete-confirm-btn" onclick={() => deletePrep(deletingId!)}>
-						Delete
-					</button>
+					<button class="delete-confirm-btn" onclick={() => deletePrep(deletingId!)}>Delete</button>
+
 					<button class="cancel-btn" onclick={() => (deletingId = null)}>Cancel</button>
 				</div>
 			</div>
