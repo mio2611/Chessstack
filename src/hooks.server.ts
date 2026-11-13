@@ -171,10 +171,13 @@ export const handle: Handle = async ({ event, resolve }) => {
 	return response;
 };
 
-// Log unexpected server errors (500s) so they appear in docker logs.
-// SvelteKit still returns its default error response — this just ensures
+// Log unexpected server errors so they appear in docker logs.
+// SvelteKit still returns its default error response; this just ensures
 // we don't lose visibility into what went wrong.
-export const handleError: HandleServerError = async ({ error, event }) => {
+export const handleError: HandleServerError = async ({ error, event, kind }) => {
+	// Kit 3 calls this hook for every error. App errors (error(...)) and
+	// framework errors (404, 405...) are expected and routine: skip them.
+	if (kind !== 'unknown') return;
 	console.error(
 		`[chessstack] Unhandled error on ${event.request.method} ${event.url.pathname}:`,
 		error
