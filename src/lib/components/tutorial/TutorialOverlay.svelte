@@ -11,7 +11,7 @@
 <script lang="ts">
 	import { goto, invalidateAll } from '$app/navigation';
 	import { page } from '$app/stores';
-	import { tutorialStep } from '$lib/stores/tutorial';
+	import { tutorialStep } from '#lib/stores/tutorial.js';
 	import { TUTORIAL_STEPS, TOTAL_STEPS } from './tutorialSteps';
 
 	// ── Derived state ────────────────────────────────────────────────────────

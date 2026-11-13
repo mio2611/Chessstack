@@ -21,29 +21,29 @@
 
 <script lang="ts">
 	import { onMount, untrack } from 'svelte';
-	import ChessBoard from '$lib/components/ChessBoard.svelte';
-	import ResizableBoard from '$lib/components/ResizableBoard.svelte';
-	import OpeningName from '$lib/components/OpeningName.svelte';
-	import ReviewIssuePicker from '$lib/components/ReviewIssuePicker.svelte';
+	import ChessBoard from '#lib/components/ChessBoard.svelte';
+	import ResizableBoard from '#lib/components/ResizableBoard.svelte';
+	import OpeningName from '#lib/components/OpeningName.svelte';
+	import ReviewIssuePicker from '#lib/components/ReviewIssuePicker.svelte';
 	import { enhance } from '$app/forms';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import type { PageData } from './$types';
-	import type { GameAnalysis, GameIssue } from '$lib/pgn';
-	import { initSounds, setSoundEnabled, playMove, playCapture } from '$lib/sounds';
-	import { manageRepertoiresOpen } from '$lib/stores/manageRepertoires';
+	import type { GameAnalysis, GameIssue } from '#lib/pgn/index.js';
+	import { initSounds, setSoundEnabled, playMove, playCapture } from '#lib/sounds.js';
+	import { manageRepertoiresOpen } from '#lib/stores/manageRepertoires.js';
 	import type { DrawShape } from '@lichess-org/chessground/draw';
 	import type { Key } from '@lichess-org/chessground/types';
 	import { Chess } from 'chess.js';
-	import { STARTING_FEN, fenKey } from '$lib/fen';
+	import { STARTING_FEN, fenKey } from '#lib/fen.js';
 	import {
 		EngineUnavailableError,
 		evaluatePosition,
 		evaluatePositionMultiPv,
 		resetEngine,
 		type MultiPvLine
-	} from '$lib/client/stockfish';
-	import { evaluateGame, toPositionEval, type PositionEval } from '$lib/client/gameEval';
-	import { scanGameForAntiGaffe } from '$lib/client/antiGaffeScan';
+	} from '#lib/client/stockfish.js';
+	import { evaluateGame, toPositionEval, type PositionEval } from '#lib/client/gameEval.js';
+	import { scanGameForAntiGaffe } from '#lib/client/antiGaffeScan.js';
 
 	let { data, form }: { data: PageData; form: Record<string, unknown> | null } = $props();
 

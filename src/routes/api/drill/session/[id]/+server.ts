@@ -4,8 +4,8 @@
 
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { db } from '$lib/db';
-import { drillSession, userRepertoireMove } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { drillSession, userRepertoireMove } from '#lib/db/schema.js';
 import { eq, and, gt, min } from 'drizzle-orm';
 
 export const PATCH: RequestHandler = async ({ locals, params, request }) => {

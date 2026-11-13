@@ -30,26 +30,26 @@
 -->
 
 <script lang="ts">
-	import ChessBoard from '$lib/components/ChessBoard.svelte';
-	import ResizableBoard from '$lib/components/ResizableBoard.svelte';
-	import CandidateMoves from '$lib/components/CandidateMoves.svelte';
-	import EvalBar from '$lib/components/EvalBar.svelte';
-	import OpeningName from '$lib/components/OpeningName.svelte';
-	import MoveList from '$lib/components/build/MoveList.svelte';
-	import GraphView from '$lib/components/build/GraphView.svelte';
-	import AnnotationModal from '$lib/components/build/AnnotationModal.svelte';
-	import ImportPgnModal from '$lib/components/build/ImportPgnModal.svelte';
-	import { createBuildState, STARTING_FEN } from '$lib/components/build/buildState.svelte';
-	import { fenKey } from '$lib/fen';
+	import ChessBoard from '#lib/components/ChessBoard.svelte';
+	import ResizableBoard from '#lib/components/ResizableBoard.svelte';
+	import CandidateMoves from '#lib/components/CandidateMoves.svelte';
+	import EvalBar from '#lib/components/EvalBar.svelte';
+	import OpeningName from '#lib/components/OpeningName.svelte';
+	import MoveList from '#lib/components/build/MoveList.svelte';
+	import GraphView from '#lib/components/build/GraphView.svelte';
+	import AnnotationModal from '#lib/components/build/AnnotationModal.svelte';
+	import ImportPgnModal from '#lib/components/build/ImportPgnModal.svelte';
+	import { createBuildState, STARTING_FEN } from '#lib/components/build/buildState.svelte.js';
+	import { fenKey } from '#lib/fen.js';
 	import { invalidateAll } from '$app/navigation';
 	import { onMount, untrack } from 'svelte';
 	import type { PageData } from './$types';
-	import { initSounds, setSoundEnabled } from '$lib/sounds';
-	import { downloadTextFile, copyToClipboard } from '$lib/download';
+	import { initSounds, setSoundEnabled } from '#lib/sounds.js';
+	import { downloadTextFile, copyToClipboard } from '#lib/download.js';
 	import { Chess } from 'chess.js';
 	import type { DrawShape } from '@lichess-org/chessground/draw';
 	import type { Key } from '@lichess-org/chessground/types';
-	import { tutorialStep } from '$lib/stores/tutorial';
+	import { tutorialStep } from '#lib/stores/tutorial.js';
 
 	let importOpen = $state(false);
 	let exporting = $state(false);

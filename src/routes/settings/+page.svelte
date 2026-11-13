@@ -3,8 +3,8 @@
 	import { invalidateAll, goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { onDestroy } from 'svelte';
-	import ChessBoard from '$lib/components/ChessBoard.svelte';
-	import { tutorialStep } from '$lib/stores/tutorial';
+	import ChessBoard from '#lib/components/ChessBoard.svelte';
+	import { tutorialStep } from '#lib/stores/tutorial.js';
 
 	let { data }: { data: PageData } = $props();
 

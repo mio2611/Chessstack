@@ -1,16 +1,16 @@
 <script lang="ts">
-	import favicon from '$lib/assets/favicon.svg';
+	import favicon from '#lib/assets/favicon.svg';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
 	import type { Snippet } from 'svelte';
 	import type { LayoutData } from './$types';
-	import RepertoireSelector from '$lib/components/RepertoireSelector.svelte';
-	import ManageRepertoireModal from '$lib/components/ManageRepertoireModal.svelte';
-	import TutorialOverlay from '$lib/components/tutorial/TutorialOverlay.svelte';
-	import { manageRepertoiresOpen } from '$lib/stores/manageRepertoires';
-	import { tutorialStep } from '$lib/stores/tutorial';
+	import RepertoireSelector from '#lib/components/RepertoireSelector.svelte';
+	import ManageRepertoireModal from '#lib/components/ManageRepertoireModal.svelte';
+	import TutorialOverlay from '#lib/components/tutorial/TutorialOverlay.svelte';
+	import { manageRepertoiresOpen } from '#lib/stores/manageRepertoires.js';
+	import { tutorialStep } from '#lib/stores/tutorial.js';
 	import { afterNavigate } from '$app/navigation';
-	import { navCounts, refreshNavCounts, setNavRepertoire } from '$lib/stores/navCounts';
+	import { navCounts, refreshNavCounts, setNavRepertoire } from '#lib/stores/navCounts.js';
 
 	// `data` comes from +layout.server.ts and includes `user`, `repertoires`,
 	// and `activeRepertoireId`.
@@ -206,7 +206,7 @@
 {/if}
 
 <style>
-	@import '$lib/styles/tokens.css';
+	@import '#lib/styles/tokens.css';
 
 	:global(*) {
 		box-sizing: border-box;

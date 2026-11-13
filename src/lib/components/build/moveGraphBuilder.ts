@@ -17,7 +17,7 @@
  * re-simulates a move sequence from the starting position.
  */
 
-import { fenKey, STARTING_FEN } from '$lib/fen';
+import { fenKey, STARTING_FEN } from '#lib/fen.js';
 
 interface MoveInput {
 	fromFen: string;

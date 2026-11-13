@@ -12,7 +12,7 @@
 	// Board square colors come from our generated theme CSS (class-scoped),
 	// and the cburnett piece set is the default (piece set selection deferred).
 	import '@lichess-org/chessground/assets/chessground.base.css';
-	import '$lib/themes/board-themes.css';
+	import '#lib/themes/board-themes.css';
 	import '@lichess-org/chessground/assets/chessground.cburnett.css';
 
 	// ---------------------------------------------------------------------------

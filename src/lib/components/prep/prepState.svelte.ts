@@ -10,8 +10,8 @@
 
 import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import { Chess } from 'chess.js';
-import { playMove, playCapture } from '$lib/sounds';
-import { fenKey, STARTING_FEN } from '$lib/fen';
+import { playMove, playCapture } from '#lib/sounds.js';
+import { fenKey, STARTING_FEN } from '#lib/fen.js';
 import { resolve } from '$app/paths';
 
 // ── Types ────────────────────────────────────────────────────────────────────

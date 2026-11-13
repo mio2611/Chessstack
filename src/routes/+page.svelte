@@ -1,8 +1,8 @@
 <script lang="ts">
 	import type { PageData } from './$types';
-	import OnboardingWelcome from '$lib/components/OnboardingWelcome.svelte';
-	import OpeningName from '$lib/components/OpeningName.svelte';
-	import { formatLine } from '$lib/gaps';
+	import OnboardingWelcome from '#lib/components/OnboardingWelcome.svelte';
+	import OpeningName from '#lib/components/OpeningName.svelte';
+	import { formatLine } from '#lib/gaps.js';
 	import { resolve } from '$app/paths';
 	import { invalidateAll } from '$app/navigation';
 	import { Chess } from 'chess.js';

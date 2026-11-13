@@ -4,6 +4,7 @@
 	"version": "1.6.0",
 	"license": "AGPL-3.0-or-later",
 	"type": "module",
+	"imports": { "#lib/*": "./src/lib/*" },
 	"scripts": {
 		"dev": "vite dev",
 		"prebuild": "node copy-engine-assets.mjs",

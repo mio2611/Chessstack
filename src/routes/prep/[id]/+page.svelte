@@ -2,15 +2,15 @@
 	import type { PageData } from './$types';
 	import { resolve } from '$app/paths';
 	import { invalidateAll } from '$app/navigation';
-	import ChessBoard from '$lib/components/ChessBoard.svelte';
-	import ResizableBoard from '$lib/components/ResizableBoard.svelte';
-	import CandidateMoves from '$lib/components/CandidateMoves.svelte';
-	import PrepDashboard from '$lib/components/prep/PrepDashboard.svelte';
-	import PrepMovePanel from '$lib/components/prep/PrepMovePanel.svelte';
-	import MoveTree from '$lib/components/build/MoveTree.svelte';
-	import { createPrepState } from '$lib/components/prep/prepState.svelte';
+	import ChessBoard from '#lib/components/ChessBoard.svelte';
+	import ResizableBoard from '#lib/components/ResizableBoard.svelte';
+	import CandidateMoves from '#lib/components/CandidateMoves.svelte';
+	import PrepDashboard from '#lib/components/prep/PrepDashboard.svelte';
+	import PrepMovePanel from '#lib/components/prep/PrepMovePanel.svelte';
+	import MoveTree from '#lib/components/build/MoveTree.svelte';
+	import { createPrepState } from '#lib/components/prep/prepState.svelte.js';
 	import { SvelteSet } from 'svelte/reactivity';
-	import type { AggregatedMove, WorkerParseMessage, WorkerOutboundMessage } from '$lib/prep/types';
+	import type { AggregatedMove, WorkerParseMessage, WorkerOutboundMessage } from '#lib/prep/types.js';
 
 	let { data }: { data: PageData } = $props();
 	const s = createPrepState({ getPrepId: () => data.prep.id });

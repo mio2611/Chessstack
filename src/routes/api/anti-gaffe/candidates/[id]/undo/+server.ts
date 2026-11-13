@@ -15,8 +15,8 @@
 
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { db } from '$lib/db';
-import { antiGaffeCandidate, antiGaffeCard, antiGaffeReviewLog } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { antiGaffeCandidate, antiGaffeCard, antiGaffeReviewLog } from '#lib/db/schema.js';
 import { eq, and, count } from 'drizzle-orm';
 
 export const POST: RequestHandler = async ({ locals, params }) => {

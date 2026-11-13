@@ -13,10 +13,10 @@
 
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { db } from '$lib/db';
-import { lichessMoves } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { lichessMoves } from '#lib/db/schema.js';
 import { eq, and, desc } from 'drizzle-orm';
-import { fenKey } from '$lib/fen';
+import { fenKey } from '#lib/fen.js';
 import type { MastersMove, MastersResponse } from '../masters/+server';
 
 const MAX_MOVES = 12;

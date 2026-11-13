@@ -9,12 +9,12 @@
 // names for API stability, but the candidate moves come from the players
 // database (lichess_moves), not an opening book.
 
-import { fenKey, STARTING_FEN } from '$lib/fen';
-import { lichessMoves } from '$lib/db/schema';
+import { fenKey, STARTING_FEN } from '#lib/fen.js';
+import { lichessMoves } from '#lib/db/schema.js';
 import { and, inArray } from 'drizzle-orm';
-import { getEffectiveStartFens } from '$lib/repertoire';
-import { gapRatingWindow } from '$lib/ratings';
-import type { db } from '$lib/db';
+import { getEffectiveStartFens } from '#lib/repertoire.js';
+import { gapRatingWindow } from '#lib/ratings.js';
+import type { db } from '#lib/db/index.js';
 export { fenKey, STARTING_FEN };
 
 /** A single gap: a player-DB move the user hasn't prepared a response to. */

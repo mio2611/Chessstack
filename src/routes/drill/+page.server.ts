@@ -12,15 +12,15 @@
 //
 import type { PageServerLoad } from './$types';
 import { redirect } from '@sveltejs/kit';
-import { db } from '$lib/db';
-import { userMove, userRepertoireMove } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { userMove, userRepertoireMove } from '#lib/db/schema.js';
 import { eq, and, lte } from 'drizzle-orm';
-import { fenKey } from '$lib/gaps';
-import { sanitizeFen } from '$lib/fen';
-import { buildInScopeFens } from '$lib/repertoire';
-import { scopeCards } from '$lib/server/due-counts';
-import { intervalLabels } from '$lib/fsrs';
-import { loadFsrsConfig } from '$lib/server/fsrs-config';
+import { fenKey } from '#lib/gaps.js';
+import { sanitizeFen } from '#lib/fen.js';
+import { buildInScopeFens } from '#lib/repertoire.js';
+import { scopeCards } from '#lib/server/due-counts.js';
+import { intervalLabels } from '#lib/fsrs.js';
+import { loadFsrsConfig } from '#lib/server/fsrs-config.js';
 
 export const load: PageServerLoad = async ({ locals, parent, url }) => {
 	const { activeRepertoireId, repertoires } = await parent();

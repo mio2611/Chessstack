@@ -5,11 +5,11 @@
 
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { db } from '$lib/db';
-import { repertoire, userMove, userSettings } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { repertoire, userMove, userSettings } from '#lib/db/schema.js';
 import { eq, and } from 'drizzle-orm';
-import { loadGapData } from '$lib/gaps';
-import { gapRatingWindow } from '$lib/ratings';
+import { loadGapData } from '#lib/gaps.js';
+import { gapRatingWindow } from '#lib/ratings.js';
 
 export const GET: RequestHandler = async ({ locals, url }) => {
 	if (!locals.user) throw error(401, 'Not authenticated');

@@ -17,11 +17,11 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { Chess } from 'chess.js';
-import { db } from '$lib/db';
-import { repertoire, userMove, userRepertoireMove } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { repertoire, userMove, userRepertoireMove } from '#lib/db/schema.js';
 import { eq, and } from 'drizzle-orm';
-import { fenKey } from '$lib/fen';
-import { lockRepertoire } from '$lib/server/repertoire-lock';
+import { fenKey } from '#lib/fen.js';
+import { lockRepertoire } from '#lib/server/repertoire-lock.js';
 
 // ── GET ────────────────────────────────────────────────────────────────────────
 

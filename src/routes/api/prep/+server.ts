@@ -6,11 +6,11 @@
 
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { db } from '$lib/db';
-import { opponentPreps, opponentMoves } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { opponentPreps, opponentMoves } from '#lib/db/schema.js';
 import { eq, desc } from 'drizzle-orm';
-import { fenKey } from '$lib/fen';
-import type { AggregatedMove } from '$lib/prep/types';
+import { fenKey } from '#lib/fen.js';
+import type { AggregatedMove } from '#lib/prep/types.js';
 
 // ── GET ──────────────────────────────────────────────────────────────────────
 

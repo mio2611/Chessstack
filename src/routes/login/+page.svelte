@@ -4,7 +4,7 @@
 	// and SvelteKit puts that in `form` so we can display the error message.
 	import type { ActionData, PageData } from './$types';
 	import { resolve } from '$app/paths';
-	import favicon from '$lib/assets/favicon.svg';
+	import favicon from '#lib/assets/favicon.svg';
 
 	let { form, data }: { form: ActionData; data: PageData } = $props();
 </script>

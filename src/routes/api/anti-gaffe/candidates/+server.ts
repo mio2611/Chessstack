@@ -21,10 +21,10 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { Chess } from 'chess.js';
-import { db } from '$lib/db';
-import { importedGame, reviewedGame, antiGaffeCandidate } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { importedGame, reviewedGame, antiGaffeCandidate } from '#lib/db/schema.js';
 import { eq, and } from 'drizzle-orm';
-import { fenKey } from '$lib/fen';
+import { fenKey } from '#lib/fen.js';
 
 const EVAL_WINDOW_MAX = 300; // eval_before_cp must be within [-300, 300]
 const MIN_CP_LOSS = 100;

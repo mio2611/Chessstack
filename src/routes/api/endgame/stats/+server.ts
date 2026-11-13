@@ -3,7 +3,7 @@
 
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getEndgameStats } from '$lib/server/endgame-stats';
+import { getEndgameStats } from '#lib/server/endgame-stats.js';
 
 export const GET: RequestHandler = async ({ locals }) => {
 	if (!locals.user) throw error(401, 'Not authenticated');

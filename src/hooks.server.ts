@@ -13,18 +13,18 @@
 //   6. If the user IS authenticated and is trying to visit /login, redirects to /
 
 import { json, redirect } from '@sveltejs/kit';
-import type { Handle, HandleServerError } from '@sveltejs/kit';
+import type { Handle, HandleServerError } from '@sveltejs/kit/hooks';
 import {
 	validateSession,
 	deleteSession,
 	SESSION_COOKIE_NAME,
 	SESSION_MAX_AGE_SECONDS,
 	SECURE_COOKIE
-} from '$lib/auth';
-import { db, dbReady } from '$lib/db';
-import { user, userSettings } from '$lib/db/schema';
+} from '#lib/auth/index.js';
+import { db, dbReady } from '#lib/db/index.js';
+import { user, userSettings } from '#lib/db/schema.js';
 import { eq } from 'drizzle-orm';
-import { startImportScheduler } from '$lib/server/import-scheduler';
+import { startImportScheduler } from '#lib/server/import-scheduler.js';
 
 // Who can register: 'open' = anyone, 'invite' = admin only (default).
 const REGISTRATION_MODE = process.env.REGISTRATION_MODE ?? 'invite';

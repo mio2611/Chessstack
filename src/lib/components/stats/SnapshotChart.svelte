@@ -5,7 +5,7 @@
 		type CardSnapshotPoint,
 		type Period,
 		type SnapshotBucket
-	} from '$lib/stats-aggregation';
+	} from '#lib/stats-aggregation.js';
 
 	let {
 		points,

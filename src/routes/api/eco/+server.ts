@@ -18,9 +18,9 @@
 
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { db } from '$lib/db';
-import { lookupEco } from '$lib/eco';
-import { fenKey } from '$lib/fen';
+import { db } from '#lib/db/index.js';
+import { lookupEco } from '#lib/eco.js';
+import { fenKey } from '#lib/fen.js';
 
 export const POST: RequestHandler = async ({ request, locals }) => {
 	if (!locals.user) throw error(401, 'Not authenticated');

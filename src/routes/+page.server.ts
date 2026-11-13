@@ -12,7 +12,7 @@
 //   - Trouble Spots (cards with lapses >= 3)
 
 import type { PageServerLoad } from './$types';
-import { db } from '$lib/db';
+import { db } from '#lib/db/index.js';
 import {
 	userMove,
 	userRepertoireMove,
@@ -21,14 +21,14 @@ import {
 	reviewLog,
 	endgameReviewLog,
 	antiGaffeReviewLog
-} from '$lib/db/schema';
+} from '#lib/db/schema.js';
 import { eq, and, gt, desc } from 'drizzle-orm';
-import { loadGapData } from '$lib/gaps';
-import type { Gap } from '$lib/gaps';
-import { gapRatingWindow } from '$lib/ratings';
-import { scopeCards, isDue, countDueEndgame, countDueAntiGaffe } from '$lib/server/due-counts';
-import type { DueCounts } from '$lib/server/due-counts';
-import { resolveTimeZone, makeDayFormatter, computeStreak, periodStartDay } from '$lib/local-days';
+import { loadGapData } from '#lib/gaps.js';
+import type { Gap } from '#lib/gaps.js';
+import { gapRatingWindow } from '#lib/ratings.js';
+import { scopeCards, isDue, countDueEndgame, countDueAntiGaffe } from '#lib/server/due-counts.js';
+import type { DueCounts } from '#lib/server/due-counts.js';
+import { resolveTimeZone, makeDayFormatter, computeStreak, periodStartDay } from '#lib/local-days.js';
 
 /** Shape of a trouble-spot card returned to the page. */
 export interface TroubleSpot {
