@@ -22,7 +22,7 @@
 	import { untrack } from 'svelte';
 	import type { RepertoireMove } from './buildState.svelte';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
-	import { isMature as isMatureCard, isStrugglingCard } from '$lib/stats-aggregation';
+	import { isMature as isMatureCard, isStrugglingCard } from '#lib/stats-aggregation.js';
 
 	// Inlined locally under a distinct name rather than imported from
 	// $lib/fen: importing the shared fenKey here (or even a locally-defined

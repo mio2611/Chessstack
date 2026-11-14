@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Period } from '$lib/stats-aggregation';
+	import type { Period } from '#lib/stats-aggregation.js';
 
 	let {
 		value = $bindable(),

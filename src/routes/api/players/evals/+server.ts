@@ -23,9 +23,9 @@ import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { Chess } from 'chess.js';
 import { and, eq, inArray } from 'drizzle-orm';
-import { db } from '$lib/db';
-import { positionEvalCache } from '$lib/db/schema';
-import { fenKey, sanitizeFen, toFullFen } from '$lib/fen';
+import { db } from '#lib/db/index.js';
+import { positionEvalCache } from '#lib/db/schema.js';
+import { fenKey, sanitizeFen, toFullFen } from '#lib/fen.js';
 
 // Depth of every row read and written here. Must match TARGET_DEPTH in
 // $lib/client/stockfish.ts, the depth the client actually searches at.

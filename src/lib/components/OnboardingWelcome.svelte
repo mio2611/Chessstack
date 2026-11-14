@@ -1,24 +1,7 @@
-<!--
-	OnboardingWelcome.svelte
-	────────────────────────
-	Shown on the dashboard when the user has no repertoires yet.
-
-	Responsibilities:
-	  1. Welcome the user and orient them to what the app does.
-	  2. Briefly explain the two main modes: Build and Drill.
-	  3. Provide a simple "Create your first repertoire" form.
-	  4. After a successful create, call invalidateAll() so the layout
-	     re-fetches the repertoire list. The parent page will then see
-	     repertoires.length > 0 and swap this screen for the dashboard.
-
-	This component is self-contained — it manages its own form state and
-	talks directly to the API, just as RepertoireSelector does.
--->
-
 <script lang="ts">
 	import { invalidateAll, goto } from '$app/navigation';
-	import { resolveRoute } from '$app/paths';
-	import favicon from '$lib/assets/favicon.svg';
+	import { resolve } from '$app/paths';
+	import favicon from '#lib/assets/favicon.svg';
 
 	// ── Form state ──────────────────────────────────────────────────────────────
 	let name = $state('');
@@ -63,9 +46,26 @@
 
 		// Step 4: Re-run all load functions, then redirect to Build Mode
 		await invalidateAll();
-		await goto(resolveRoute('/build'));
+		await goto(resolve('/build'));
 	}
 </script>
+
+<!--
+	OnboardingWelcome.svelte
+	────────────────────────
+	Shown on the dashboard when the user has no repertoires yet.
+
+	Responsibilities:
+	  1. Welcome the user and orient them to what the app does.
+	  2. Briefly explain the two main modes: Build and Drill.
+	  3. Provide a simple "Create your first repertoire" form.
+	  4. After a successful create, call invalidateAll() so the layout
+	     re-fetches the repertoire list. The parent page will then see
+	     repertoires.length > 0 and swap this screen for the dashboard.
+
+	This component is self-contained — it manages its own form state and
+	talks directly to the API, just as RepertoireSelector does.
+-->
 
 <div class="welcome-wrap">
 	<div class="welcome-card">

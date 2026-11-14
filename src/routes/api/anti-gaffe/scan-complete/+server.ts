@@ -8,8 +8,8 @@
 
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { db } from '$lib/db';
-import { importedGame, reviewedGame } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { importedGame, reviewedGame } from '#lib/db/schema.js';
 import { eq, and } from 'drizzle-orm';
 
 export const POST: RequestHandler = async ({ locals, request }) => {

@@ -6,7 +6,7 @@
  * which matters for move sounds that should sync with piece animation.
  *
  * Usage:
- *   import { initSounds, setSoundEnabled, playMove, playCapture, playCorrect, playIncorrect } from '$lib/sounds';
+ *   import { initSounds, setSoundEnabled, playMove, playCapture, playCorrect, playIncorrect } from '#lib/sounds.js';
  *
  *   // Call once when the app loads (or when the board page mounts).
  *   await initSounds();

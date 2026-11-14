@@ -10,8 +10,9 @@
 
 import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import { Chess } from 'chess.js';
-import { playMove, playCapture } from '$lib/sounds';
-import { fenKey, STARTING_FEN } from '$lib/fen';
+import { playMove, playCapture } from '#lib/sounds.js';
+import { fenKey, STARTING_FEN } from '#lib/fen.js';
+import { resolve } from '$app/paths';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -85,7 +86,6 @@ function resolveSquares(fen: string, san: string): [string, string] | undefined 
 
 interface CreatePrepStateParams {
 	getPrepId: () => number;
-	getBaseUrl: () => string;
 }
 
 export function createPrepState(params: CreatePrepStateParams) {
@@ -685,7 +685,7 @@ export function createPrepState(params: CreatePrepStateParams) {
 		// New prep move on the user's turn — save it to the database
 		saving = true;
 		try {
-			const res = await fetch(`${params.getBaseUrl()}/api/prep/${params.getPrepId()}/moves`, {
+			const res = await fetch(resolve('/api/prep/[id]/moves', { id: String(params.getPrepId()) }), {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
@@ -728,7 +728,7 @@ export function createPrepState(params: CreatePrepStateParams) {
 		errorMsg = null;
 
 		try {
-			const res = await fetch(`${params.getBaseUrl()}/api/prep/${params.getPrepId()}/moves`, {
+			const res = await fetch(resolve('/api/prep/[id]/moves', { id: String(params.getPrepId()) }), {
 				method: 'DELETE',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ moveId })
@@ -751,7 +751,7 @@ export function createPrepState(params: CreatePrepStateParams) {
 
 	async function persistFilters(): Promise<void> {
 		try {
-			await fetch(`${params.getBaseUrl()}/api/prep/${params.getPrepId()}`, {
+			await fetch(resolve('/api/prep/[id]', { id: String(params.getPrepId()) }), {
 				method: 'PATCH',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({

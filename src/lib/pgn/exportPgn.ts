@@ -7,7 +7,7 @@
  * Pure function — no database or framework dependency.
  */
 
-import { fenKey, STARTING_FEN } from '$lib/fen';
+import { fenKey, STARTING_FEN } from '#lib/fen.js';
 
 // ── Public types ─────────────────────────────────────────────────────────────
 

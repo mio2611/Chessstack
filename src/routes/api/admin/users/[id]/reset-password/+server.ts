@@ -3,8 +3,8 @@
 
 import type { RequestHandler } from './$types';
 import { json, error } from '@sveltejs/kit';
-import { db } from '$lib/db';
-import { user, session } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { user, session } from '#lib/db/schema.js';
 import { eq } from 'drizzle-orm';
 import bcrypt from 'bcryptjs';
 

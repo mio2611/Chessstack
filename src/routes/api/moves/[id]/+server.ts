@@ -25,11 +25,11 @@
 
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { db } from '$lib/db';
-import { userMove, userRepertoireMove, repertoire } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { userMove, userRepertoireMove, repertoire } from '#lib/db/schema.js';
 import { eq, and, inArray, notExists, sql } from 'drizzle-orm';
-import { findOrphanedMoveIds, treeRoots } from '$lib/moveOrphans';
-import { lockRepertoire } from '$lib/server/repertoire-lock';
+import { findOrphanedMoveIds, treeRoots } from '#lib/moveOrphans.js';
+import { lockRepertoire } from '#lib/server/repertoire-lock.js';
 
 export const DELETE: RequestHandler = async ({ locals, params }) => {
 	if (!locals.user) throw error(401, 'Not authenticated');

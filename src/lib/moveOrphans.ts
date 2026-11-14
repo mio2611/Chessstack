@@ -9,8 +9,8 @@
 // Shared by the server (what to delete) and the Build page (what to show), so
 // the screen and the database cannot disagree.
 
-import { fenKey, STARTING_FEN } from '$lib/fen';
-import { buildInScopeFens } from '$lib/repertoire';
+import { fenKey, STARTING_FEN } from '#lib/fen.js';
+import { buildInScopeFens } from '#lib/repertoire.js';
 
 /** Minimal move shape: works with userMove rows and with the client's moves. */
 export interface TreeMove {

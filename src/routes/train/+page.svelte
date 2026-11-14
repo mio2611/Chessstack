@@ -12,18 +12,18 @@
 -->
 
 <script lang="ts">
-	import ChessBoard from '$lib/components/ChessBoard.svelte';
-	import ResizableBoard from '$lib/components/ResizableBoard.svelte';
-	import OpeningName from '$lib/components/OpeningName.svelte';
-	import { fenKey, STARTING_FEN, toFullFen } from '$lib/fen';
-	import { reconstructPath } from '$lib/repertoire';
+	import ChessBoard from '#lib/components/ChessBoard.svelte';
+	import ResizableBoard from '#lib/components/ResizableBoard.svelte';
+	import OpeningName from '#lib/components/OpeningName.svelte';
+	import { fenKey, STARTING_FEN, toFullFen } from '#lib/fen.js';
+	import { reconstructPath } from '#lib/repertoire.js';
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { Chess } from 'chess.js';
 	import type { PageData } from './$types';
-	import { initSounds, setSoundEnabled, playMove, playCapture } from '$lib/sounds';
-	import type { TrainerEvalResult } from '$lib/trainer';
-	import { RATING_BRACKETS, bracketForRating } from '$lib/ratings';
+	import { initSounds, setSoundEnabled, playMove, playCapture } from '#lib/sounds.js';
+	import type { TrainerEvalResult } from '#lib/trainer.js';
+	import { RATING_BRACKETS, bracketForRating } from '#lib/ratings.js';
 
 	type Phase = 'setup' | 'playing' | 'ended';
 
@@ -546,7 +546,7 @@
 				repertoireId: data.repertoire.id
 			})
 		);
-		goto('/review'); // eslint-disable-line svelte/no-navigation-without-resolve
+		goto('/review');
 	}
 
 	// ── Play again ──────────────────────────────────────────────────────────────

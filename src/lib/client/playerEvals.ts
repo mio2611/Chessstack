@@ -18,7 +18,7 @@
 // the coloring thresholds. Never mix the two in the same comparison.
 
 import { Chess } from 'chess.js';
-import { fenKey } from '$lib/fen';
+import { fenKey } from '#lib/fen.js';
 import {
 	EngineUnavailableError,
 	evaluatePositionBackground,

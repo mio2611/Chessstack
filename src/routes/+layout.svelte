@@ -1,16 +1,16 @@
 <script lang="ts">
-	import favicon from '$lib/assets/favicon.svg';
-	import { base } from '$app/paths';
-	import { page } from '$app/stores';
+	import favicon from '#lib/assets/favicon.svg';
+	import { resolve } from '$app/paths';
+	import { page } from '$app/state';
 	import type { Snippet } from 'svelte';
 	import type { LayoutData } from './$types';
-	import RepertoireSelector from '$lib/components/RepertoireSelector.svelte';
-	import ManageRepertoireModal from '$lib/components/ManageRepertoireModal.svelte';
-	import TutorialOverlay from '$lib/components/tutorial/TutorialOverlay.svelte';
-	import { manageRepertoiresOpen } from '$lib/stores/manageRepertoires';
-	import { tutorialStep } from '$lib/stores/tutorial';
+	import RepertoireSelector from '#lib/components/RepertoireSelector.svelte';
+	import ManageRepertoireModal from '#lib/components/ManageRepertoireModal.svelte';
+	import TutorialOverlay from '#lib/components/tutorial/TutorialOverlay.svelte';
+	import { manageRepertoiresOpen } from '#lib/stores/manageRepertoires.js';
+	import { tutorialStep } from '#lib/stores/tutorial.js';
 	import { afterNavigate } from '$app/navigation';
-	import { navCounts, refreshNavCounts, setNavRepertoire } from '$lib/stores/navCounts';
+	import { navCounts, refreshNavCounts, setNavRepertoire } from '#lib/stores/navCounts.js';
 
 	// `data` comes from +layout.server.ts and includes `user`, `repertoires`,
 	// and `activeRepertoireId`.
@@ -29,18 +29,31 @@
 	// `badge` is the number of due items for the modules that have one.
 	type NavLink = { href: string; label: string; badge?: number };
 	const navLinks: NavLink[] = $derived([
-		{ href: `${base}/`, label: 'Dashboard' },
-		{ href: `${base}/build`, label: 'Build' },
-		{ href: `${base}/drill`, label: 'Drill', badge: $navCounts.drill },
-		{ href: `${base}/train`, label: 'Train' },
-		{ href: `${base}/puzzles`, label: 'Puzzles' },
-		{ href: `${base}/endgame`, label: 'Endgames', badge: $navCounts.endgame },
-		{ href: `${base}/anti-gaffe`, label: 'Blunders', badge: $navCounts.antiGaffe },
-		{ href: `${base}/review`, label: 'Review' },
-		{ href: `${base}/prep`, label: 'Prep' },
-		{ href: `${base}/stats`, label: 'Stats' },
-		{ href: `${base}/settings`, label: 'Settings' },
-		...(data.user?.role === 'admin' ? [{ href: `${base}/admin`, label: 'Admin' }] : [])
+		{ href: resolve('/'), label: 'Dashboard' },
+		{ href: resolve('/build'), label: 'Build' },
+		{
+			href: resolve('/drill'),
+			label: 'Drill',
+			badge: $navCounts.drill
+		},
+		{ href: resolve('/train'), label: 'Train' },
+		{ href: resolve('/puzzles'), label: 'Puzzles' },
+		{
+			href: resolve('/endgame'),
+			label: 'Endgames',
+			badge: $navCounts.endgame
+		},
+
+		{
+			href: resolve('/anti-gaffe'),
+			label: 'Blunders',
+			badge: $navCounts.antiGaffe
+		},
+		{ href: resolve('/review'), label: 'Review' },
+		{ href: resolve('/prep'), label: 'Prep' },
+		{ href: resolve('/stats'), label: 'Stats' },
+		{ href: resolve('/settings'), label: 'Settings' },
+		...(data.user?.role === 'admin' ? [{ href: resolve('/admin'), label: 'Admin' }] : [])
 	]);
 
 	// The drawer is closed by default on mobile, so the badges inside it are
@@ -96,8 +109,8 @@
 	// Determine if a nav link is the active page.
 	// Dashboard matches exact "/", others match by prefix.
 	function isActive(href: string): boolean {
-		const path = $page.url.pathname;
-		if (href === `${base}/`) return path === `${base}/` || path === base;
+		const path = page.url.pathname;
+		if (href === resolve('/')) return path === resolve('/');
 		return path.startsWith(href);
 	}
 </script>
@@ -112,8 +125,9 @@
 -->
 {#if data.user}
 	<header class="app-header">
-		<a href="{base}/" class="brand">
+		<a href={resolve('/')} class="brand">
 			<img class="brand-icon" src={favicon} alt="Chessstack logo" />
+
 			<span class="brand-text">Chessstack</span>
 		</a>
 
@@ -125,10 +139,11 @@
 					class="nav-link"
 					class:active={isActive(link.href)}
 					aria-current={isActive(link.href) ? 'page' : undefined}
-					>{link.label}{#if link.badge}<span class="nav-badge" aria-label="{link.badge} due"
-							>{badgeText(link.badge)}</span
-						>{/if}</a
 				>
+					{link.label}{#if link.badge}
+						<span class="nav-badge" aria-label="{link.badge} due">{badgeText(link.badge)}</span>
+					{/if}
+				</a>
 			{/each}
 		</nav>
 
@@ -169,10 +184,11 @@
 					class:active={isActive(link.href)}
 					aria-current={isActive(link.href) ? 'page' : undefined}
 					onclick={() => (mobileMenuOpen = false)}
-					>{link.label}{#if link.badge}<span class="nav-badge" aria-label="{link.badge} due"
-							>{badgeText(link.badge)}</span
-						>{/if}</a
 				>
+					{link.label}{#if link.badge}
+						<span class="nav-badge" aria-label="{link.badge} due">{badgeText(link.badge)}</span>
+					{/if}
+				</a>
 			{/each}
 		</nav>
 	{/if}
@@ -189,7 +205,7 @@
 {/if}
 
 <style>
-	@import '$lib/styles/tokens.css';
+	@import '#lib/styles/tokens.css';
 
 	:global(*) {
 		box-sizing: border-box;

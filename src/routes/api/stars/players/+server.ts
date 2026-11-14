@@ -5,8 +5,8 @@
 
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { db } from '$lib/db';
-import { starPlayers } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { starPlayers } from '#lib/db/schema.js';
 import { asc } from 'drizzle-orm';
 
 export interface StarPlayer {

@@ -12,7 +12,7 @@
 -->
 
 <script lang="ts">
-	import CandidateMoves from '$lib/components/CandidateMoves.svelte';
+	import CandidateMoves from '#lib/components/CandidateMoves.svelte';
 
 	interface Props {
 		fen: string;

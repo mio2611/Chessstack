@@ -9,12 +9,12 @@
 
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { db } from '$lib/db';
-import { repertoire } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { repertoire } from '#lib/db/schema.js';
 import { and, eq } from 'drizzle-orm';
-import { getDueCounts } from '$lib/server/due-counts';
-import { scheduleCardSnapshot } from '$lib/server/card-snapshots';
-import { resolveTimeZone } from '$lib/local-days';
+import { getDueCounts } from '#lib/server/due-counts.js';
+import { scheduleCardSnapshot } from '#lib/server/card-snapshots.js';
+import { resolveTimeZone } from '#lib/local-days.js';
 
 export const GET: RequestHandler = async ({ locals, url, cookies }) => {
 	if (!locals.user) throw error(401, 'Not authenticated');

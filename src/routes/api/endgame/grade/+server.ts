@@ -11,11 +11,11 @@
 
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { db } from '$lib/db';
-import { endgameCard, endgameReviewLog } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { endgameCard, endgameReviewLog } from '#lib/db/schema.js';
 import { eq, and } from 'drizzle-orm';
-import { gradeCard, buildReviewLogEntry, Rating } from '$lib/fsrs';
-import { loadFsrsConfig } from '$lib/server/fsrs-config';
+import { gradeCard, buildReviewLogEntry, Rating } from '#lib/fsrs.js';
+import { loadFsrsConfig } from '#lib/server/fsrs-config.js';
 
 export const POST: RequestHandler = async ({ locals, request }) => {
 	if (!locals.user) throw error(401, 'Not authenticated');

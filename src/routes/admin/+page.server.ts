@@ -2,8 +2,8 @@
 // Access is already guarded by hooks.server.ts (admin role required).
 
 import type { PageServerLoad } from './$types';
-import { db } from '$lib/db';
-import { user } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { user } from '#lib/db/schema.js';
 
 const REGISTRATION_MODE = process.env.REGISTRATION_MODE ?? 'invite';
 

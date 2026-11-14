@@ -5,7 +5,7 @@
 
 import type { RequestHandler } from './$types';
 import { json, error } from '@sveltejs/kit';
-import { db } from '$lib/db';
+import { db } from '#lib/db/index.js';
 import {
 	user,
 	session,
@@ -17,7 +17,7 @@ import {
 	drillSession,
 	puzzleAttempt,
 	importedGame
-} from '$lib/db/schema';
+} from '#lib/db/schema.js';
 import { eq, and, count } from 'drizzle-orm';
 
 export const PATCH: RequestHandler = async ({ locals, params, request }) => {

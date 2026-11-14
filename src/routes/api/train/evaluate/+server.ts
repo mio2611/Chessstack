@@ -5,12 +5,12 @@
 
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { db } from '$lib/db';
-import { userSettings, trainerSession } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { userSettings, trainerSession } from '#lib/db/schema.js';
 import { eq } from 'drizzle-orm';
-import { getTopMoves } from '$lib/stockfish';
-import { evalToScore, computeRatingChange, bracketMidpoint } from '$lib/trainer';
-import type { TrainerEvalResult } from '$lib/trainer';
+import { getTopMoves } from '#lib/stockfish/index.js';
+import { evalToScore, computeRatingChange, bracketMidpoint } from '#lib/trainer.js';
+import type { TrainerEvalResult } from '#lib/trainer.js';
 
 // Fixed target depth for the post-game evaluation. Not user-configurable:
 // this endpoint is the only caller of getTopMoves that needs it, and unlike

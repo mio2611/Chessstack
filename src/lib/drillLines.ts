@@ -13,8 +13,8 @@
 // reason: transpositions multiply paths (k layers of two move orders give 2^k
 // lines), and an unbounded walk of such a graph would run out of memory.
 
-import { fenKey, STARTING_FEN } from '$lib/fen';
-import { buildInScopeFens, getEffectiveStartFens } from '$lib/repertoire';
+import { fenKey, STARTING_FEN } from '#lib/fen.js';
+import { buildInScopeFens, getEffectiveStartFens } from '#lib/repertoire.js';
 
 /** One step in a root-to-leaf line through the repertoire tree. */
 export interface LineStep {

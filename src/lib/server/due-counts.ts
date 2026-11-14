@@ -9,17 +9,17 @@
 // to offer until all positions have been seen, so counting them would keep
 // the badge lit permanently.
 
-import { db } from '$lib/db';
+import { db } from '#lib/db/index.js';
 import {
 	userMove,
 	userRepertoireMove,
 	endgameCard,
 	antiGaffeCard,
 	repertoire
-} from '$lib/db/schema';
+} from '#lib/db/schema.js';
 import { and, count, eq, lte } from 'drizzle-orm';
-import { fenKey } from '$lib/gaps';
-import { getEffectiveStartFens, buildInScopeFens } from '$lib/repertoire';
+import { fenKey } from '#lib/gaps.js';
+import { getEffectiveStartFens, buildInScopeFens } from '#lib/repertoire.js';
 
 export interface DueCounts {
 	drill: number;

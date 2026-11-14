@@ -18,9 +18,9 @@
 
 <script lang="ts">
 	import { SvelteMap } from 'svelte/reactivity';
-	import type { ImportConflict, ImportPreview } from '$lib/pgn/detectConflicts';
+	import type { ImportConflict, ImportPreview } from '#lib/pgn/detectConflicts.js';
 	import type { DrawShape } from '@lichess-org/chessground/draw';
-	import ChessBoard from '$lib/components/ChessBoard.svelte';
+	import ChessBoard from '#lib/components/ChessBoard.svelte';
 	import { Chess } from 'chess.js';
 
 	let {

@@ -5,11 +5,11 @@
 //   - review/fail-card (failing a card from game review)
 //   - drill/+page.server.ts (computing interval labels)
 
-import { db } from '$lib/db';
-import { userSettings } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { userSettings } from '#lib/db/schema.js';
 import { eq } from 'drizzle-orm';
-import { DEFAULT_RETENTION, DEFAULT_MAX_INTERVAL, DEFAULT_RELEARNING_MINUTES } from '$lib/fsrs';
-import type { FSRSUserConfig } from '$lib/fsrs';
+import { DEFAULT_RETENTION, DEFAULT_MAX_INTERVAL, DEFAULT_RELEARNING_MINUTES } from '#lib/fsrs.js';
+import type { FSRSUserConfig } from '#lib/fsrs.js';
 
 export async function loadFsrsConfig(userId: number): Promise<FSRSUserConfig> {
 	const [settings] = await db

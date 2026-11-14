@@ -23,11 +23,11 @@
 -->
 
 <script lang="ts">
-	import ChessBoard from '$lib/components/ChessBoard.svelte';
-	import ResizableBoard from '$lib/components/ResizableBoard.svelte';
-	import OpeningName from '$lib/components/OpeningName.svelte';
-	import NoteText from '$lib/components/NoteText.svelte';
-	import { fenKey, STARTING_FEN } from '$lib/fen';
+	import ChessBoard from '#lib/components/ChessBoard.svelte';
+	import ResizableBoard from '#lib/components/ResizableBoard.svelte';
+	import OpeningName from '#lib/components/OpeningName.svelte';
+	import NoteText from '#lib/components/NoteText.svelte';
+	import { fenKey, STARTING_FEN } from '#lib/fen.js';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import { untrack } from 'svelte';
 	import { onMount } from 'svelte';
@@ -44,8 +44,8 @@
 		playCapture,
 		playCorrect,
 		playIncorrect
-	} from '$lib/sounds';
-	import { tutorialStep } from '$lib/stores/tutorial';
+	} from '#lib/sounds.js';
+	import { tutorialStep } from '#lib/stores/tutorial.js';
 	import {
 		enumerateLines,
 		indexCards,
@@ -53,8 +53,8 @@
 		sortLinesByWeakness,
 		MAX_ENUMERATED_LINES,
 		type LineStep
-	} from '$lib/drillLines';
-	import { refreshNavCounts } from '$lib/stores/navCounts';
+	} from '#lib/drillLines.js';
+	import { refreshNavCounts } from '#lib/stores/navCounts.js';
 
 	// Shape of a move row from the server (user_move table).
 	interface RepertoireMove {

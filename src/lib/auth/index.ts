@@ -6,8 +6,8 @@
 // All functions here are async because the PostgreSQL driver is async.
 
 import crypto from 'crypto';
-import { db } from '$lib/db';
-import { session } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { session } from '#lib/db/schema.js';
 import { eq } from 'drizzle-orm';
 
 // The cookie name. Must match exactly between the code that sets the cookie

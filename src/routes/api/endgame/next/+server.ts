@@ -29,8 +29,8 @@
 
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { db } from '$lib/db';
-import { endgameCard, endgamePosition } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { endgameCard, endgamePosition } from '#lib/db/schema.js';
 import { eq, and, lte, isNotNull, notInArray, not, or } from 'drizzle-orm';
 import {
 	categoryRank,
@@ -38,7 +38,7 @@ import {
 	pairKey,
 	parseExcluded,
 	type ExcludedPair
-} from '$lib/server/endgame-stats';
+} from '#lib/server/endgame-stats.js';
 
 function modeForCategory(category: string): 'theory' | 'practice' {
 	return category === 'Basic' ? 'theory' : 'practice';

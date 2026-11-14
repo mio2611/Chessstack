@@ -7,8 +7,8 @@
 
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { db } from '$lib/db';
-import { puzzleAttempt } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { puzzleAttempt } from '#lib/db/schema.js';
 
 export const POST: RequestHandler = async ({ request, locals }) => {
 	if (!locals.user) throw error(401, 'Not authenticated');

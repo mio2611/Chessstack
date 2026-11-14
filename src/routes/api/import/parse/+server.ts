@@ -11,11 +11,11 @@
 
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { db } from '$lib/db';
-import { repertoire, userMove } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { repertoire, userMove } from '#lib/db/schema.js';
 import { eq, and } from 'drizzle-orm';
-import { parseVariationPgn } from '$lib/pgn/parseVariations';
-import { detectConflicts } from '$lib/pgn/detectConflicts';
+import { parseVariationPgn } from '#lib/pgn/parseVariations.js';
+import { detectConflicts } from '#lib/pgn/detectConflicts.js';
 
 export const POST: RequestHandler = async ({ locals, request }) => {
 	if (!locals.user) throw error(401, 'Not authenticated');

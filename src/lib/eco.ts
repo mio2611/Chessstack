@@ -14,9 +14,9 @@
 
 import { inArray } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import { ecoOpening } from '$lib/db/schema';
-import type * as schema from '$lib/db/schema';
-import { fenKey } from '$lib/fen';
+import { ecoOpening } from '#lib/db/schema.js';
+import type * as schema from '#lib/db/schema.js';
+import { fenKey } from '#lib/fen.js';
 
 // Look up the most specific ECO name for a sequence of board positions.
 //

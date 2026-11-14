@@ -22,8 +22,8 @@
 -->
 
 <script lang="ts">
-	import ChessBoard from '$lib/components/ChessBoard.svelte';
-	import ResizableBoard from '$lib/components/ResizableBoard.svelte';
+	import ChessBoard from '#lib/components/ChessBoard.svelte';
+	import ResizableBoard from '#lib/components/ResizableBoard.svelte';
 	import { onMount } from 'svelte';
 	import { Chess } from 'chess.js';
 	import type { Key } from '@lichess-org/chessground/types';
@@ -36,7 +36,7 @@
 		playCapture,
 		playCorrect,
 		playIncorrect
-	} from '$lib/sounds';
+	} from '#lib/sounds.js';
 
 	type Phase = 'idle' | 'loading' | 'setup' | 'waiting' | 'correct' | 'incorrect' | 'solved';
 

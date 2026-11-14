@@ -15,8 +15,8 @@
 // consumer can access the board theme without duplicating the query.
 
 import type { LayoutServerLoad } from './$types';
-import { db } from '$lib/db';
-import { repertoire, userSettings } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { repertoire, userSettings } from '#lib/db/schema.js';
 import { eq } from 'drizzle-orm';
 
 const REGISTRATION_MODE = process.env.REGISTRATION_MODE ?? 'invite';

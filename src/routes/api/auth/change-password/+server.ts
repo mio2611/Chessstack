@@ -7,10 +7,10 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import bcrypt from 'bcryptjs';
-import { db } from '$lib/db';
-import { user, session } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { user, session } from '#lib/db/schema.js';
 import { eq, and, ne } from 'drizzle-orm';
-import { SESSION_COOKIE_NAME } from '$lib/auth';
+import { SESSION_COOKIE_NAME } from '#lib/auth/index.js';
 
 export const POST: RequestHandler = async ({ locals, request, cookies }) => {
 	if (!locals.user) throw error(401, 'Not authenticated');

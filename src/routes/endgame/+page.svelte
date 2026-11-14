@@ -25,8 +25,8 @@
 	//   opponent-thinking → playing) → complete → loading (next card)
 	//   Terminal states: no-cards, error.
 
-	import ChessBoard from '$lib/components/ChessBoard.svelte';
-	import ResizableBoard from '$lib/components/ResizableBoard.svelte';
+	import ChessBoard from '#lib/components/ChessBoard.svelte';
+	import ResizableBoard from '#lib/components/ResizableBoard.svelte';
 	import { onMount } from 'svelte';
 	import { Chess } from 'chess.js';
 	import {
@@ -36,9 +36,9 @@
 		playCapture,
 		playCorrect,
 		playIncorrect
-	} from '$lib/sounds';
-	import { toFullFen } from '$lib/fen';
-	import { refreshNavCounts } from '$lib/stores/navCounts';
+	} from '#lib/sounds.js';
+	import { toFullFen } from '#lib/fen.js';
+	import { refreshNavCounts } from '#lib/stores/navCounts.js';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();

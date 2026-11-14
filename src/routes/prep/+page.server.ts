@@ -1,8 +1,8 @@
 // Prep list page — loads all opponent preps for the authenticated user.
 
 import type { PageServerLoad } from './$types';
-import { db } from '$lib/db';
-import { opponentPreps } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { opponentPreps } from '#lib/db/schema.js';
 import { eq, desc } from 'drizzle-orm';
 
 export const load: PageServerLoad = async ({ locals }) => {

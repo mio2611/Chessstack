@@ -9,9 +9,9 @@
 
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { fetchLichessGames, LichessApiError } from '$lib/lichess';
-import { fetchChesscomGames, ChesscomApiError } from '$lib/chesscom';
-import { timeWindowToSince } from '$lib/prep/timeWindow';
+import { fetchLichessGames, LichessApiError } from '#lib/lichess.js';
+import { fetchChesscomGames, ChesscomApiError } from '#lib/chesscom.js';
+import { timeWindowToSince } from '#lib/prep/timeWindow.js';
 
 export const POST: RequestHandler = async ({ locals, request }) => {
 	if (!locals.user) throw error(401, 'Not authenticated');

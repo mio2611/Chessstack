@@ -5,8 +5,8 @@
 
 import type { PageServerLoad } from './$types';
 import { redirect } from '@sveltejs/kit';
-import { db } from '$lib/db';
-import { trainerSavedPosition, userSettings, userMove } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { trainerSavedPosition, userSettings, userMove } from '#lib/db/schema.js';
 import { eq, and, desc } from 'drizzle-orm';
 
 export const load: PageServerLoad = async ({ locals, parent }) => {

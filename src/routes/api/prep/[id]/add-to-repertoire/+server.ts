@@ -10,7 +10,7 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { Chess } from 'chess.js';
-import { db } from '$lib/db';
+import { db } from '#lib/db/index.js';
 import {
 	opponentPreps,
 	opponentMoves,
@@ -18,11 +18,11 @@ import {
 	repertoire,
 	userMove,
 	userRepertoireMove
-} from '$lib/db/schema';
+} from '#lib/db/schema.js';
 import { eq, and } from 'drizzle-orm';
-import { fenKey } from '$lib/fen';
-import { replaceUserMove } from '$lib/server/replace-move';
-import { lockRepertoire } from '$lib/server/repertoire-lock';
+import { fenKey } from '#lib/fen.js';
+import { replaceUserMove } from '#lib/server/replace-move.js';
+import { lockRepertoire } from '#lib/server/repertoire-lock.js';
 
 export const POST: RequestHandler = async ({ locals, params, request }) => {
 	if (!locals.user) throw error(401, 'Not authenticated');
