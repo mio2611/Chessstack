@@ -10,7 +10,7 @@
 
 <script lang="ts">
 	import { goto, invalidateAll } from '$app/navigation';
-	import { page } from '$app/stores';
+	import { page } from '$app/state';
 	import { tutorialStep } from '#lib/stores/tutorial.js';
 	import { TUTORIAL_STEPS, TOTAL_STEPS } from './tutorialSteps';
 
@@ -22,7 +22,7 @@
 	// Check if user is on the correct page for the current step
 	let onCorrectPage = $derived.by(() => {
 		if (!stepDef) return true;
-		const path = $page.url.pathname;
+		const path = page.url.pathname;
 		if (stepDef.page === '/') return path === '/';
 		return path.startsWith(stepDef.page);
 	});

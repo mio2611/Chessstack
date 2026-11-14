@@ -1,7 +1,7 @@
 <script lang="ts">
 	import favicon from '#lib/assets/favicon.svg';
 	import { resolve } from '$app/paths';
-	import { page } from '$app/stores';
+	import { page } from '$app/state';
 	import type { Snippet } from 'svelte';
 	import type { LayoutData } from './$types';
 	import RepertoireSelector from '#lib/components/RepertoireSelector.svelte';
@@ -109,7 +109,7 @@
 	// Determine if a nav link is the active page.
 	// Dashboard matches exact "/", others match by prefix.
 	function isActive(href: string): boolean {
-		const path = $page.url.pathname;
+		const path = page.url.pathname;
 		if (href === resolve('/'))
 			return path === resolve('/');
 		return path.startsWith(href);
