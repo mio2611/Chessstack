@@ -80,7 +80,7 @@
 				const nextStep =
 					currentStep !== null && currentStep < TOTAL_STEPS - 1 ? currentStep + 1 : null;
 				await patchStep(nextStep);
-				// eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic path from tutorial step definitions
+
 				await goto(destination);
 			} else if (currentStep === TOTAL_STEPS - 1) {
 				// Last step — finish tutorial
@@ -95,7 +95,6 @@
 
 	async function navigateToCorrectPage() {
 		if (stepDef?.page) {
-			// eslint-disable-next-line svelte/no-navigation-without-resolve -- static paths from tutorial step definitions
 			await goto(stepDef.page);
 		}
 	}

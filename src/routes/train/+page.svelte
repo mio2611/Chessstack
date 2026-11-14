@@ -546,7 +546,7 @@
 				repertoireId: data.repertoire.id
 			})
 		);
-		goto('/review'); // eslint-disable-line svelte/no-navigation-without-resolve
+		goto('/review');
 	}
 
 	// ── Play again ──────────────────────────────────────────────────────────────
