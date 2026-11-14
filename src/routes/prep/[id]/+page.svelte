@@ -10,7 +10,11 @@
 	import MoveTree from '#lib/components/build/MoveTree.svelte';
 	import { createPrepState } from '#lib/components/prep/prepState.svelte.js';
 	import { SvelteSet } from 'svelte/reactivity';
-	import type { AggregatedMove, WorkerParseMessage, WorkerOutboundMessage } from '#lib/prep/types.js';
+	import type {
+		AggregatedMove,
+		WorkerParseMessage,
+		WorkerOutboundMessage
+	} from '#lib/prep/types.js';
 
 	let { data }: { data: PageData } = $props();
 	const s = createPrepState({ getPrepId: () => data.prep.id });
@@ -121,15 +125,18 @@
 
 		try {
 			// Step 1: Fetch PGNs using selected time window
-			const fetchRes = await fetch(resolve('/api/prep/[id]/refresh', { id: String(data.prep.id) }), {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					mode: 'fetch',
-					timeWindow: refreshTimeWindow,
-					maxGames: refreshMaxGames
-				})
-			});
+			const fetchRes = await fetch(
+				resolve('/api/prep/[id]/refresh', { id: String(data.prep.id) }),
+				{
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						mode: 'fetch',
+						timeWindow: refreshTimeWindow,
+						maxGames: refreshMaxGames
+					})
+				}
+			);
 
 			if (!fetchRes.ok) throw new Error('Fetch failed');
 			const { pgns, gameCount, hasMore } = await fetchRes.json();
@@ -190,15 +197,18 @@
 			const totalChunks = Math.ceil(allMoves.length / CHUNK_SIZE);
 
 			// Phase 1: delete old data and update metadata
-			const startRes = await fetch(resolve('/api/prep/[id]/refresh', { id: String(data.prep.id) }), {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					mode: 'merge-start',
-					gamesAsWhite: result.gamesAsWhite,
-					gamesAsBlack: result.gamesAsBlack
-				})
-			});
+			const startRes = await fetch(
+				resolve('/api/prep/[id]/refresh', { id: String(data.prep.id) }),
+				{
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						mode: 'merge-start',
+						gamesAsWhite: result.gamesAsWhite,
+						gamesAsBlack: result.gamesAsBlack
+					})
+				}
+			);
 			if (!startRes.ok) {
 				const err = await startRes.json().catch(() => null);
 				throw new Error(err?.message || `Merge start failed (${startRes.status})`);
@@ -210,11 +220,14 @@
 				const chunkNum = Math.floor(i / CHUNK_SIZE) + 1;
 				refreshStatus = `Saving moves... ${chunkNum}/${totalChunks}`;
 
-				const batchRes = await fetch(resolve('/api/prep/[id]/refresh', { id: String(data.prep.id) }), {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ mode: 'merge-batch', moves: chunk })
-				});
+				const batchRes = await fetch(
+					resolve('/api/prep/[id]/refresh', { id: String(data.prep.id) }),
+					{
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ mode: 'merge-batch', moves: chunk })
+					}
+				);
 				if (!batchRes.ok) {
 					const err = await batchRes.json().catch(() => null);
 					throw new Error(err?.message || `Merge batch ${chunkNum} failed (${batchRes.status})`);
@@ -267,15 +280,18 @@
 		addReplacements.clear();
 
 		try {
-			const res = await fetch(resolve('/api/prep/[id]/add-to-repertoire', { id: String(data.prep.id) }), {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					mode: 'preview',
-					repertoireId: addTargetRepId,
-					color: s.activeColor
-				})
-			});
+			const res = await fetch(
+				resolve('/api/prep/[id]/add-to-repertoire', { id: String(data.prep.id) }),
+				{
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						mode: 'preview',
+						repertoireId: addTargetRepId,
+						color: s.activeColor
+					})
+				}
+			);
 			if (!res.ok) {
 				const err = await res.json().catch(() => null);
 				throw new Error(err?.message || `Preview failed (${res.status})`);
@@ -304,16 +320,19 @@
 			.map((c) => ({ fromFen: c.fromFen, san: c.prepMove }));
 
 		try {
-			const res = await fetch(resolve('/api/prep/[id]/add-to-repertoire', { id: String(data.prep.id) }), {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					mode: 'execute',
-					repertoireId: addTargetRepId,
-					color: s.activeColor,
-					replacements
-				})
-			});
+			const res = await fetch(
+				resolve('/api/prep/[id]/add-to-repertoire', { id: String(data.prep.id) }),
+				{
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						mode: 'execute',
+						repertoireId: addTargetRepId,
+						color: s.activeColor,
+						replacements
+					})
+				}
+			);
 			if (!res.ok) {
 				const err = await res.json().catch(() => null);
 				throw new Error(err?.message || `Import failed (${res.status})`);

@@ -2,7 +2,11 @@
 	import type { PageData } from './$types';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import type { WorkerParseMessage, WorkerOutboundMessage, AggregatedMove } from '#lib/prep/types.js';
+	import type {
+		WorkerParseMessage,
+		WorkerOutboundMessage,
+		AggregatedMove
+	} from '#lib/prep/types.js';
 
 	let { data }: { data: PageData } = $props();
 

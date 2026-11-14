@@ -110,8 +110,7 @@
 	// Dashboard matches exact "/", others match by prefix.
 	function isActive(href: string): boolean {
 		const path = page.url.pathname;
-		if (href === resolve('/'))
-			return path === resolve('/');
+		if (href === resolve('/')) return path === resolve('/');
 		return path.startsWith(href);
 	}
 </script>

@@ -28,7 +28,12 @@ import type { Gap } from '#lib/gaps.js';
 import { gapRatingWindow } from '#lib/ratings.js';
 import { scopeCards, isDue, countDueEndgame, countDueAntiGaffe } from '#lib/server/due-counts.js';
 import type { DueCounts } from '#lib/server/due-counts.js';
-import { resolveTimeZone, makeDayFormatter, computeStreak, periodStartDay } from '#lib/local-days.js';
+import {
+	resolveTimeZone,
+	makeDayFormatter,
+	computeStreak,
+	periodStartDay
+} from '#lib/local-days.js';
 
 /** Shape of a trouble-spot card returned to the page. */
 export interface TroubleSpot {
