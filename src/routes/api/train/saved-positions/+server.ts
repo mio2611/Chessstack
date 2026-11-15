@@ -5,10 +5,10 @@
 
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { db } from '$lib/db';
-import { trainerSavedPosition } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { trainerSavedPosition } from '#lib/db/schema.js';
 import { eq, and, desc } from 'drizzle-orm';
-import { fenKey, sanitizeFen } from '$lib/fen';
+import { fenKey, sanitizeFen } from '#lib/fen.js';
 
 /** List all saved positions for the authenticated user. */
 export const GET: RequestHandler = async ({ locals }) => {

@@ -21,7 +21,7 @@
 // mixed. Only searches that reached the target depth must be stored; the
 // caller decides, this module cannot know.
 
-import { fenKey } from '$lib/fen';
+import { fenKey } from '#lib/fen.js';
 import type { MultiPvLine } from './stockfish';
 
 const MAX_ENTRIES = 500;

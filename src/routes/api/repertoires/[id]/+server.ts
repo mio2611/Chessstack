@@ -3,16 +3,16 @@
 
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { db } from '$lib/db';
+import { db } from '#lib/db/index.js';
 import {
 	repertoire,
 	userMove,
 	userRepertoireMove,
 	reviewedGame,
 	drillSession
-} from '$lib/db/schema';
+} from '#lib/db/schema.js';
 import { and, eq } from 'drizzle-orm';
-import { fenKey } from '$lib/fen';
+import { fenKey } from '#lib/fen.js';
 
 // ── PATCH ──────────────────────────────────────────────────────────────────────
 // Expects JSON body: { name?: string, startFen?: string | null }

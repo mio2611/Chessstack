@@ -13,10 +13,10 @@
 //   Lines reachable another way (a transposition) are kept. Decided by
 //   reachability, see $lib/moveOrphans, so loops cannot make it run forever.
 
-import { db } from '$lib/db';
-import { userMove, userRepertoireMove } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { userMove, userRepertoireMove } from '#lib/db/schema.js';
 import { and, eq, inArray } from 'drizzle-orm';
-import { findOrphanedMoveIds, treeRoots } from '$lib/moveOrphans';
+import { findOrphanedMoveIds, treeRoots } from '#lib/moveOrphans.js';
 
 // Transaction type extracted from db.transaction() callback parameter
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];

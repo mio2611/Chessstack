@@ -6,8 +6,8 @@
 
 import type { Actions, PageServerLoad } from './$types';
 import { fail, redirect, error } from '@sveltejs/kit';
-import { db } from '$lib/db';
-import { user } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { user } from '#lib/db/schema.js';
 import { eq } from 'drizzle-orm';
 import bcrypt from 'bcryptjs';
 import {
@@ -15,7 +15,7 @@ import {
 	SESSION_COOKIE_NAME,
 	SESSION_MAX_AGE_SECONDS,
 	SECURE_COOKIE
-} from '$lib/auth';
+} from '#lib/auth/index.js';
 
 const REGISTRATION_MODE = process.env.REGISTRATION_MODE ?? 'invite';
 

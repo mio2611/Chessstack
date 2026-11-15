@@ -16,22 +16,22 @@
 // to match.
 
 import type { PageServerLoad } from './$types';
-import { db } from '$lib/db';
-import { userMove, userRepertoireMove, reviewLog } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { userMove, userRepertoireMove, reviewLog } from '#lib/db/schema.js';
 import { eq, and, inArray } from 'drizzle-orm';
-import { scopeCards } from '$lib/server/due-counts';
-import { lookupEcoBatch } from '$lib/eco';
-import { loadFsrsConfig } from '$lib/server/fsrs-config';
-import { State, Rating } from '$lib/fsrs';
-import { resolveTimeZone, makeDayFormatter } from '$lib/local-days';
+import { scopeCards } from '#lib/server/due-counts.js';
+import { lookupEcoBatch } from '#lib/eco.js';
+import { loadFsrsConfig } from '#lib/server/fsrs-config.js';
+import { State, Rating } from '#lib/fsrs.js';
+import { resolveTimeZone, makeDayFormatter } from '#lib/local-days.js';
 import {
 	buildDailyStats,
 	countsForRetention,
 	isMature,
 	type CardSnapshotPoint,
 	type DailyStat
-} from '$lib/stats-aggregation';
-import { countCards, loadCardSnapshots, upsertCardSnapshot } from '$lib/server/card-snapshots';
+} from '#lib/stats-aggregation.js';
+import { countCards, loadCardSnapshots, upsertCardSnapshot } from '#lib/server/card-snapshots.js';
 
 const FORECAST_DAYS = 14;
 const OPENING_STATS_LIMIT = 8;

@@ -7,9 +7,9 @@
 
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { db } from '$lib/db';
-import { userSettings } from '$lib/db/schema';
-import { TOTAL_STEPS } from '$lib/components/tutorial/tutorialSteps';
+import { db } from '#lib/db/index.js';
+import { userSettings } from '#lib/db/schema.js';
+import { TOTAL_STEPS } from '#lib/components/tutorial/tutorialSteps.js';
 import { eq } from 'drizzle-orm';
 
 export const PATCH: RequestHandler = async ({ locals, request }) => {

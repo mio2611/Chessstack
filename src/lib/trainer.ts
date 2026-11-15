@@ -5,7 +5,7 @@
 // applies a standard Elo expected-score calculation against the opponent
 // bracket midpoint.
 
-import { RATING_BRACKETS } from '$lib/ratings';
+import { RATING_BRACKETS } from '#lib/ratings.js';
 
 /** Default K-factor for rating updates (standard chess rapid K-factor). */
 const DEFAULT_K = 32;

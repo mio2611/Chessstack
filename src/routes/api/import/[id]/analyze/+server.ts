@@ -6,10 +6,10 @@
 
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { db } from '$lib/db';
-import { importedGame, repertoire, userMove } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { importedGame, repertoire, userMove } from '#lib/db/schema.js';
 import { eq, and } from 'drizzle-orm';
-import { parsePgn, analyzeGame, computeMatchDepth } from '$lib/pgn';
+import { parsePgn, analyzeGame, computeMatchDepth } from '#lib/pgn/index.js';
 
 /** Format the first N half-moves as readable notation, e.g. "1. e4 e5 2. Nf3 Nc6". */
 function formatOpeningMoves(moves: { san: string }[], plies = 4): string {

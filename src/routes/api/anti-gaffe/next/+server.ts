@@ -8,11 +8,11 @@
 
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { db } from '$lib/db';
-import { antiGaffeCard } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { antiGaffeCard } from '#lib/db/schema.js';
 import { eq, and, lte } from 'drizzle-orm';
-import { intervalLabels } from '$lib/fsrs';
-import { loadFsrsConfig } from '$lib/server/fsrs-config';
+import { intervalLabels } from '#lib/fsrs.js';
+import { loadFsrsConfig } from '#lib/server/fsrs-config.js';
 
 export const GET: RequestHandler = async ({ locals }) => {
 	if (!locals.user) throw error(401, 'Not authenticated');

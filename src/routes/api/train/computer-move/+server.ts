@@ -7,10 +7,10 @@
 
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { db } from '$lib/db';
-import { lichessMoves, chessmontMoves } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { lichessMoves, chessmontMoves } from '#lib/db/schema.js';
 import { eq, and } from 'drizzle-orm';
-import { fenKey } from '$lib/fen';
+import { fenKey } from '#lib/fen.js';
 
 export const GET: RequestHandler = async ({ url, locals }) => {
 	if (!locals.user) throw error(401, 'Not authenticated');

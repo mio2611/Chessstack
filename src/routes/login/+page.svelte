@@ -3,8 +3,8 @@
 	// If the login fails, the action returns { error: '...' } via fail(),
 	// and SvelteKit puts that in `form` so we can display the error message.
 	import type { ActionData, PageData } from './$types';
-	import { base } from '$app/paths';
-	import favicon from '$lib/assets/favicon.svg';
+	import { resolve } from '$app/paths';
+	import favicon from '#lib/assets/favicon.svg';
 
 	let { form, data }: { form: ActionData; data: PageData } = $props();
 </script>
@@ -50,7 +50,10 @@
 		</form>
 
 		{#if data.registrationOpen}
-			<p class="register-link">No account? <a href="{base}/register">Create one</a></p>
+			<p class="register-link">
+				No account?
+				<a href={resolve('/register')}>Create one</a>
+			</p>
 		{/if}
 	</div>
 </div>

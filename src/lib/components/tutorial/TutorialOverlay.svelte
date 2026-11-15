@@ -10,8 +10,8 @@
 
 <script lang="ts">
 	import { goto, invalidateAll } from '$app/navigation';
-	import { page } from '$app/stores';
-	import { tutorialStep } from '$lib/stores/tutorial';
+	import { page } from '$app/state';
+	import { tutorialStep } from '#lib/stores/tutorial.js';
 	import { TUTORIAL_STEPS, TOTAL_STEPS } from './tutorialSteps';
 
 	// ── Derived state ────────────────────────────────────────────────────────
@@ -22,7 +22,7 @@
 	// Check if user is on the correct page for the current step
 	let onCorrectPage = $derived.by(() => {
 		if (!stepDef) return true;
-		const path = $page.url.pathname;
+		const path = page.url.pathname;
 		if (stepDef.page === '/') return path === '/';
 		return path.startsWith(stepDef.page);
 	});
@@ -80,7 +80,7 @@
 				const nextStep =
 					currentStep !== null && currentStep < TOTAL_STEPS - 1 ? currentStep + 1 : null;
 				await patchStep(nextStep);
-				// eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic path from tutorial step definitions
+
 				await goto(destination);
 			} else if (currentStep === TOTAL_STEPS - 1) {
 				// Last step — finish tutorial
@@ -95,7 +95,6 @@
 
 	async function navigateToCorrectPage() {
 		if (stepDef?.page) {
-			// eslint-disable-next-line svelte/no-navigation-without-resolve -- static paths from tutorial step definitions
 			await goto(stepDef.page);
 		}
 	}

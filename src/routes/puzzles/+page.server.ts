@@ -8,11 +8,11 @@
 
 import type { PageServerLoad } from './$types';
 import { redirect } from '@sveltejs/kit';
-import { db } from '$lib/db';
-import { userMove, ecoOpening, puzzle } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { userMove, ecoOpening, puzzle } from '#lib/db/schema.js';
 import { eq, and, inArray, sql, count } from 'drizzle-orm';
-import { normalizeOpening, removeParentNames, getDeepestEcoNames } from '$lib/puzzleMatching';
-import { fenKey, STARTING_FEN } from '$lib/fen';
+import { normalizeOpening, removeParentNames, getDeepestEcoNames } from '#lib/puzzleMatching.js';
+import { fenKey, STARTING_FEN } from '#lib/fen.js';
 
 export const load: PageServerLoad = async ({ locals, parent }) => {
 	const { activeRepertoireId, repertoires } = await parent();

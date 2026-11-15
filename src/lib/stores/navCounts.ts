@@ -6,14 +6,14 @@
 // badge follows the session instead of waiting for the next navigation.
 
 import { writable } from 'svelte/store';
-import { base } from '$app/paths';
+
+import { resolve } from '$app/paths';
 
 export interface NavCounts {
 	drill: number;
 	endgame: number;
 	antiGaffe: number;
 }
-
 export const navCounts = writable<NavCounts>({ drill: 0, endgame: 0, antiGaffe: 0 });
 
 let repertoireId: number | null = null;
@@ -29,7 +29,7 @@ export async function refreshNavCounts(): Promise<void> {
 	const ticket = ++latestRequest;
 	try {
 		const qs = repertoireId === null ? '' : `?repertoireId=${repertoireId}`;
-		const res = await fetch(`${base}/api/nav-counts${qs}`);
+		const res = await fetch(resolve('/api/nav-counts') + qs);
 		if (!res.ok || ticket !== latestRequest) return;
 		navCounts.set((await res.json()) as NavCounts);
 	} catch {

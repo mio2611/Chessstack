@@ -6,7 +6,7 @@
  */
 
 import type { TreeNode } from './MoveTreeLine.svelte';
-import { fenKey, STARTING_FEN } from '$lib/fen';
+import { fenKey, STARTING_FEN } from '#lib/fen.js';
 
 export { fenKey };
 

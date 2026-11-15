@@ -7,10 +7,10 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { Chess } from 'chess.js';
-import { db } from '$lib/db';
-import { opponentPreps, prepMoves } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { opponentPreps, prepMoves } from '#lib/db/schema.js';
 import { eq, and } from 'drizzle-orm';
-import { fenKey, sanitizeFen } from '$lib/fen';
+import { fenKey, sanitizeFen } from '#lib/fen.js';
 
 // ── POST ─────────────────────────────────────────────────────────────────────
 

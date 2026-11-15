@@ -8,11 +8,11 @@
 // This module is imported and started from hooks.server.ts — it only runs
 // at runtime on the actual server, never during vite build.
 
-import { db } from '$lib/db';
-import { userSettings, importedGame } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { userSettings, importedGame } from '#lib/db/schema.js';
 import { eq } from 'drizzle-orm';
-import { fetchLichessGames } from '$lib/lichess';
-import { fetchChesscomGames } from '$lib/chesscom';
+import { fetchLichessGames } from '#lib/lichess.js';
+import { fetchChesscomGames } from '#lib/chesscom.js';
 
 const DELAY_BETWEEN_USERS_MS = 2000;
 

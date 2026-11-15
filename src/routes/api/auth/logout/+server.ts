@@ -12,7 +12,7 @@
 
 import { redirect } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { deleteSession, SESSION_COOKIE_NAME, SECURE_COOKIE } from '$lib/auth';
+import { deleteSession, SESSION_COOKIE_NAME, SECURE_COOKIE } from '#lib/auth/index.js';
 
 export const POST: RequestHandler = async ({ cookies }) => {
 	const token = cookies.get(SESSION_COOKIE_NAME);

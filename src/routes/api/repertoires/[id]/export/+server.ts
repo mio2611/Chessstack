@@ -2,10 +2,10 @@
 
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { db } from '$lib/db';
-import { repertoire, userMove } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { repertoire, userMove } from '#lib/db/schema.js';
 import { and, eq } from 'drizzle-orm';
-import { exportRepertoirePgn } from '$lib/pgn/exportPgn';
+import { exportRepertoirePgn } from '#lib/pgn/exportPgn.js';
 
 export const GET: RequestHandler = async ({ locals, params }) => {
 	if (!locals.user) throw error(401, 'Not authenticated');

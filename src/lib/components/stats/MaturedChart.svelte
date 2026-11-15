@@ -6,7 +6,7 @@
 		netSeries,
 		type DailyStat,
 		type Period
-	} from '$lib/stats-aggregation';
+	} from '#lib/stats-aggregation.js';
 
 	let { daily, today }: { daily: DailyStat[]; today: string } = $props();
 

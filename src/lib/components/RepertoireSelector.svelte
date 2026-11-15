@@ -15,7 +15,7 @@
 
 <script lang="ts">
 	import { invalidateAll } from '$app/navigation';
-	import { manageRepertoiresOpen } from '$lib/stores/manageRepertoires';
+	import { manageRepertoiresOpen } from '#lib/stores/manageRepertoires.js';
 
 	// The shape of one repertoire row as returned by the server.
 	interface Repertoire {

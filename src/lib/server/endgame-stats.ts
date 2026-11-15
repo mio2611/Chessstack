@@ -9,8 +9,8 @@
 // This is the same definition /api/endgame/next uses to decide what is
 // still "new", so the panel's New count always matches what can be offered.
 
-import { db } from '$lib/db';
-import { endgameCard, endgamePosition } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { endgameCard, endgamePosition } from '#lib/db/schema.js';
 import { and, count, eq, lte, sql } from 'drizzle-orm';
 
 // Matches the category order in the source catalogue (see

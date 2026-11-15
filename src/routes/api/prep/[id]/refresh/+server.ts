@@ -8,14 +8,14 @@
 
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { db } from '$lib/db';
-import { opponentPreps, opponentMoves } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { opponentPreps, opponentMoves } from '#lib/db/schema.js';
 import { eq, and } from 'drizzle-orm';
-import { fetchLichessGames, LichessApiError } from '$lib/lichess';
-import { fetchChesscomGames, ChesscomApiError } from '$lib/chesscom';
-import { fenKey } from '$lib/fen';
-import { timeWindowToSince } from '$lib/prep/timeWindow';
-import type { AggregatedMove } from '$lib/prep/types';
+import { fetchLichessGames, LichessApiError } from '#lib/lichess.js';
+import { fetchChesscomGames, ChesscomApiError } from '#lib/chesscom.js';
+import { fenKey } from '#lib/fen.js';
+import { timeWindowToSince } from '#lib/prep/timeWindow.js';
+import type { AggregatedMove } from '#lib/prep/types.js';
 
 // ── POST (mode: fetch) — return new PGNs since watermark ─────────────────────
 // ── POST (mode: merge) — upsert new aggregated move data ─────────────────────

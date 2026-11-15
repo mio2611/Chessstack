@@ -16,15 +16,15 @@
 	//   loading → playing → (correct → grading) | (incorrect) → loading (next)
 	//   Terminal states: no-cards, error.
 
-	import ChessBoard from '$lib/components/ChessBoard.svelte';
-	import ResizableBoard from '$lib/components/ResizableBoard.svelte';
+	import ChessBoard from '#lib/components/ChessBoard.svelte';
+	import ResizableBoard from '#lib/components/ResizableBoard.svelte';
 	import type { DrawShape } from '@lichess-org/chessground/draw';
 	import type { Key } from '@lichess-org/chessground/types';
 	import { onMount } from 'svelte';
 	import { Chess } from 'chess.js';
-	import { initSounds, setSoundEnabled, playCorrect, playIncorrect } from '$lib/sounds';
-	import { toFullFen } from '$lib/fen';
-	import { refreshNavCounts } from '$lib/stores/navCounts';
+	import { initSounds, setSoundEnabled, playCorrect, playIncorrect } from '#lib/sounds.js';
+	import { toFullFen } from '#lib/fen.js';
+	import { refreshNavCounts } from '#lib/stores/navCounts.js';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();

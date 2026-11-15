@@ -10,11 +10,11 @@
 
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { db } from '$lib/db';
-import { bookMove, ecoOpening } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { bookMove, ecoOpening } from '#lib/db/schema.js';
 import { eq, inArray } from 'drizzle-orm';
 import { Chess } from 'chess.js';
-import { fenKey } from '$lib/fen';
+import { fenKey } from '#lib/fen.js';
 
 // Shape of each candidate move returned to the browser. `evalCp`/`evalMate`
 // are always null here (book moves are never engine-annotated — see the

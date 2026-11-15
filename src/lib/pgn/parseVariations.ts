@@ -14,7 +14,7 @@
 // starting position and the edges of all games are merged.
 
 import { Chess } from 'chess.js';
-import { fenKey, STARTING_FEN } from '$lib/fen';
+import { fenKey, STARTING_FEN } from '#lib/fen.js';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 

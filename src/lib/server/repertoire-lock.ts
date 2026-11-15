@@ -14,8 +14,8 @@
 // commits, then looks, and sees the first one's work. One repertoire is locked
 // at a time, so there is no lock-ordering deadlock.
 
-import { db } from '$lib/db';
-import { repertoire } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { repertoire } from '#lib/db/schema.js';
 import { eq } from 'drizzle-orm';
 
 // Transaction type extracted from db.transaction() callback parameter

@@ -6,12 +6,12 @@
 // focus and a slow timer) refreshes it in the background. The last write of a
 // local day wins. A repertoire with no in-scope card is not recorded.
 
-import { db } from '$lib/db';
-import { cardSnapshot, userMove, userRepertoireMove, repertoire } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { cardSnapshot, userMove, userRepertoireMove, repertoire } from '#lib/db/schema.js';
 import { and, eq, asc } from 'drizzle-orm';
-import { scopeCards } from '$lib/server/due-counts';
-import { isStrugglingCard, type CardSnapshotPoint } from '$lib/stats-aggregation';
-import { makeDayFormatter } from '$lib/local-days';
+import { scopeCards } from '#lib/server/due-counts.js';
+import { isStrugglingCard, type CardSnapshotPoint } from '#lib/stats-aggregation.js';
+import { makeDayFormatter } from '#lib/local-days.js';
 
 type RepertoireRow = typeof repertoire.$inferSelect;
 

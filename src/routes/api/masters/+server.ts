@@ -10,10 +10,10 @@
 
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { db } from '$lib/db';
-import { chessmontMoves } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { chessmontMoves } from '#lib/db/schema.js';
 import { eq, desc } from 'drizzle-orm';
-import { fenKey } from '$lib/fen';
+import { fenKey } from '#lib/fen.js';
 
 /** Shape of each move returned to the client. */
 export interface MastersMove {

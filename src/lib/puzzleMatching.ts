@@ -13,7 +13,7 @@
 // IMPORTANT: This must produce identical output to normalize_opening()
 // in scripts/puzzle-import.py. If you change one, change the other.
 
-import { fenKey } from '$lib/fen';
+import { fenKey } from '#lib/fen.js';
 
 /**
  * Normalize an opening name for matching between ECO names and

@@ -5,8 +5,8 @@
 
 import type { PageServerLoad } from './$types';
 import { redirect } from '@sveltejs/kit';
-import { db } from '$lib/db';
-import { opponentPreps, opponentMoves, prepMoves, userMove, repertoire } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { opponentPreps, opponentMoves, prepMoves, userMove, repertoire } from '#lib/db/schema.js';
 import { eq, and } from 'drizzle-orm';
 
 export const load: PageServerLoad = async ({ locals, params }) => {

@@ -4,6 +4,9 @@
 	"version": "1.6.0",
 	"license": "AGPL-3.0-or-later",
 	"type": "module",
+	"imports": {
+		"#lib/*": "./src/lib/*"
+	},
 	"scripts": {
 		"dev": "vite dev",
 		"prebuild": "node copy-engine-assets.mjs",
@@ -19,8 +22,9 @@
 	"devDependencies": {
 		"@eslint/compat": "^2.0.5",
 		"@eslint/js": "^10.0.1",
-		"@sveltejs/adapter-node": "^5.5.4",
-		"@sveltejs/kit": "^2.58.0",
+		"@sveltejs/adapter-node": "^6.0.1",
+		"@sveltejs/kit": "^3.1.1",
+		"@sveltejs/load-config": "^0.2.2",
 		"@sveltejs/vite-plugin-svelte": "^7.0.0",
 		"@types/bcryptjs": "^2.4.6",
 		"@types/node": "^25.6.0",
@@ -34,10 +38,10 @@
 		"license-checker": "^25.0.1",
 		"prettier": "^3.8.3",
 		"prettier-plugin-svelte": "^3.4.1",
-		"svelte": "^5.55.5",
-		"svelte-check": "^4.3.6",
+		"svelte": "^5.57.2",
+		"svelte-check": "^4.7.5",
 		"tar-stream": "^3.2.1",
-		"typescript": "^5.9.3",
+		"typescript": "^6.0.3",
 		"typescript-eslint": "^8.59.1",
 		"vite": "^8.2.4"
 	},
@@ -51,7 +55,6 @@
 		"ts-fsrs": "^5.2.3"
 	},
 	"overrides": {
-		"cookie": "^0.7.2",
 		"@esbuild-kit/core-utils": {
 			"esbuild": "^0.25.0"
 		}

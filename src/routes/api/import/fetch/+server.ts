@@ -9,11 +9,11 @@
 
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { db } from '$lib/db';
-import { userSettings, importedGame } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { userSettings, importedGame } from '#lib/db/schema.js';
 import { eq } from 'drizzle-orm';
-import { fetchLichessGames, LichessApiError } from '$lib/lichess';
-import { fetchChesscomGames, ChesscomApiError } from '$lib/chesscom';
+import { fetchLichessGames, LichessApiError } from '#lib/lichess.js';
+import { fetchChesscomGames, ChesscomApiError } from '#lib/chesscom.js';
 
 export const POST: RequestHandler = async ({ locals, request }) => {
 	if (!locals.user) throw error(401, 'Not authenticated');

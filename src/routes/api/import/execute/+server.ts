@@ -22,12 +22,12 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { Chess } from 'chess.js';
-import { db } from '$lib/db';
-import { repertoire, userMove, userRepertoireMove } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { repertoire, userMove, userRepertoireMove } from '#lib/db/schema.js';
 import { eq, and } from 'drizzle-orm';
-import { fenKey, STARTING_FEN } from '$lib/fen';
-import { replaceUserMove } from '$lib/server/replace-move';
-import { lockRepertoire } from '$lib/server/repertoire-lock';
+import { fenKey, STARTING_FEN } from '#lib/fen.js';
+import { replaceUserMove } from '#lib/server/replace-move.js';
+import { lockRepertoire } from '#lib/server/repertoire-lock.js';
 
 // Transaction type extracted from db.transaction() callback parameter
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];

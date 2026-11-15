@@ -12,10 +12,10 @@
 
 import type { PageServerLoad, Actions } from './$types';
 import { fail, redirect } from '@sveltejs/kit';
-import { db } from '$lib/db';
-import { repertoire, userMove, reviewedGame, importedGame, userSettings } from '$lib/db/schema';
+import { db } from '#lib/db/index.js';
+import { repertoire, userMove, reviewedGame, importedGame, userSettings } from '#lib/db/schema.js';
 import { eq, and, desc } from 'drizzle-orm';
-import { parsePgn, analyzeGame, computeMatchDepth } from '$lib/pgn';
+import { parsePgn, analyzeGame, computeMatchDepth } from '#lib/pgn/index.js';
 
 export const load: PageServerLoad = async ({ locals, parent, url }) => {
 	const { activeRepertoireId, repertoires } = await parent();

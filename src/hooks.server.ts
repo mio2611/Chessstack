@@ -13,18 +13,18 @@
 //   6. If the user IS authenticated and is trying to visit /login, redirects to /
 
 import { json, redirect } from '@sveltejs/kit';
-import type { Handle, HandleServerError } from '@sveltejs/kit';
+import type { Handle, HandleServerError } from '@sveltejs/kit/hooks';
 import {
 	validateSession,
 	deleteSession,
 	SESSION_COOKIE_NAME,
 	SESSION_MAX_AGE_SECONDS,
 	SECURE_COOKIE
-} from '$lib/auth';
-import { db, dbReady } from '$lib/db';
-import { user, userSettings } from '$lib/db/schema';
+} from '#lib/auth/index.js';
+import { db, dbReady } from '#lib/db/index.js';
+import { user, userSettings } from '#lib/db/schema.js';
 import { eq } from 'drizzle-orm';
-import { startImportScheduler } from '$lib/server/import-scheduler';
+import { startImportScheduler } from '#lib/server/import-scheduler.js';
 
 // Who can register: 'open' = anyone, 'invite' = admin only (default).
 const REGISTRATION_MODE = process.env.REGISTRATION_MODE ?? 'invite';
@@ -171,10 +171,13 @@ export const handle: Handle = async ({ event, resolve }) => {
 	return response;
 };
 
-// Log unexpected server errors (500s) so they appear in docker logs.
-// SvelteKit still returns its default error response — this just ensures
+// Log unexpected server errors so they appear in docker logs.
+// SvelteKit still returns its default error response; this just ensures
 // we don't lose visibility into what went wrong.
-export const handleError: HandleServerError = async ({ error, event }) => {
+export const handleError: HandleServerError = async ({ error, event, kind }) => {
+	// Kit 3 calls this hook for every error. App errors (error(...)) and
+	// framework errors (404, 405...) are expected and routine: skip them.
+	if (kind !== 'unknown') return;
 	console.error(
 		`[chessstack] Unhandled error on ${event.request.method} ${event.url.pathname}:`,
 		error

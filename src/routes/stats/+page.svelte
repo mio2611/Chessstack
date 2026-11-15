@@ -1,9 +1,9 @@
 <script lang="ts">
 	import type { PageData } from './$types';
 	import { SvelteDate } from 'svelte/reactivity';
-	import RetentionChart from '$lib/components/stats/RetentionChart.svelte';
-	import MaturedChart from '$lib/components/stats/MaturedChart.svelte';
-	import SnapshotChart from '$lib/components/stats/SnapshotChart.svelte';
+	import RetentionChart from '#lib/components/stats/RetentionChart.svelte';
+	import MaturedChart from '#lib/components/stats/MaturedChart.svelte';
+	import SnapshotChart from '#lib/components/stats/SnapshotChart.svelte';
 
 	let { data }: { data: PageData } = $props();
 

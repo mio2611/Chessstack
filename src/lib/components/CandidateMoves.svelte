@@ -28,7 +28,7 @@
 
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { RATING_BRACKETS, DEFAULT_BRACKET_ID } from '$lib/ratings';
+	import { RATING_BRACKETS, DEFAULT_BRACKET_ID } from '#lib/ratings.js';
 	import { Chess } from 'chess.js';
 	import { SvelteMap } from 'svelte/reactivity';
 	import {
@@ -36,7 +36,7 @@
 		cancelChildEvals,
 		selectMovesToEvaluate,
 		type ChildEval
-	} from '$lib/client/playerEvals';
+	} from '#lib/client/playerEvals.js';
 	import {
 		EngineUnavailableError,
 		evaluatePositionMultiPv,
@@ -44,9 +44,9 @@
 		resetEngine,
 		TARGET_DEPTH as ENGINE_TARGET_DEPTH,
 		type MultiPvLine
-	} from '$lib/client/stockfish';
-	import { engineStatus } from '$lib/client/engineStatus.svelte';
-	import { getCachedEngineLines, cacheEngineLines } from '$lib/client/engineCache';
+	} from '#lib/client/stockfish.js';
+	import { engineStatus } from '#lib/client/engineStatus.svelte.js';
+	import { getCachedEngineLines, cacheEngineLines } from '#lib/client/engineCache.js';
 
 	// How long to wait after the position stops changing before starting a
 	// depth-20 search. Without this, clicking through several positions in

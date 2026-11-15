@@ -14,7 +14,7 @@
 <script lang="ts">
 	import { invalidateAll } from '$app/navigation';
 	import { onDestroy } from 'svelte';
-	import { downloadTextFile } from '$lib/download';
+	import { downloadTextFile } from '#lib/download.js';
 
 	interface Repertoire {
 		id: number;
