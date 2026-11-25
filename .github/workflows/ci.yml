@@ -17,6 +17,10 @@ on:
   pull_request:
     branches: [main]
 
+# Least privilege: jobs below only read the repository contents.
+permissions:
+  contents: read
+
 jobs:
   ci:
     name: Build, Type Check & Migrations
