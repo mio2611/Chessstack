@@ -116,7 +116,7 @@ async function initDatabase(): Promise<void> {
 			createdAt: new Date()
 		});
 
-		console.log(`[chessstack] Default user "${username}" created on first run.`);
+		console.log('[chessstack] Default admin user created on first run.');
 		console.log(
 			'[chessstack] Set DEFAULT_USERNAME and DEFAULT_PASSWORD environment variables to customise this.'
 		);

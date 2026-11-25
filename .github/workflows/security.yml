@@ -30,6 +30,10 @@ on:
   pull_request:
     branches: [main, deploy]
 
+# Least privilege: jobs below only read the repository contents.
+permissions:
+  contents: read
+
 jobs:
   # ── Job 1: Fast security scans ─────────────────────────────────────────────
   security-checks:
@@ -79,7 +83,7 @@ jobs:
 
       # ── Semgrep SAST ────────────────────────────────────────────────────────
       - name: Semgrep SAST
-        uses: returntocorp/semgrep-action@v1
+        uses: returntocorp/semgrep-action@713efdd345f3035192eaa63f56867b88e63e4e5d # v1
         with:
           config: >-
             p/javascript
@@ -87,7 +91,7 @@ jobs:
 
       # ── Trivy config scan (Dockerfiles, docker-compose) ─────────────────────
       - name: Trivy config scan
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
         with:
           scan-type: 'config'
           scan-ref: '.'
@@ -117,7 +121,7 @@ jobs:
         run: docker build -t chessstack:ci-scan .
 
       - name: Trivy image scan
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
         with:
           image-ref: 'chessstack:ci-scan'
           severity: 'HIGH,CRITICAL'
