@@ -34,8 +34,9 @@ import { loadSeedData } from './seed-data';
 //                 Default: "admin"
 //
 // DEFAULT_PASSWORD: Password for the automatically created first user.
-//                 Default: "changeme"
-//                 IMPORTANT: Change this in production via docker-compose.yml.
+//                 Required on first run (empty database). Startup is refused if it
+//                 is missing, empty or still set to "changeme".
+//                 Set it in docker-compose.yml.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const DATABASE_URL =
@@ -104,7 +105,17 @@ async function initDatabase(): Promise<void> {
 
 	if (existingUserCount && existingUserCount.count === 0) {
 		const username = process.env.DEFAULT_USERNAME ?? 'admin';
-		const password = process.env.DEFAULT_PASSWORD ?? 'changeme';
+		const password = process.env.DEFAULT_PASSWORD;
+
+		// Refuse to create the first admin with a missing, empty or well-known
+		// password. This only runs when the user table is empty, so existing
+		// installations are not affected.
+		const candidate = password?.trim().toLowerCase();
+		if (!password || !candidate || candidate === 'changeme') {
+			throw new Error(
+				'[chessstack] Refusing to create the first admin user: DEFAULT_PASSWORD is missing, empty or still set to "changeme". Set DEFAULT_PASSWORD to a strong value (for example in docker-compose.yml) and restart.'
+			);
+		}
 
 		// Hash the password before storing it. The number 10 is the cost factor.
 		const passwordHash = await bcrypt.hash(password, 10);
@@ -117,8 +128,5 @@ async function initDatabase(): Promise<void> {
 		});
 
 		console.log('[chessstack] Default admin user created on first run.');
-		console.log(
-			'[chessstack] Set DEFAULT_USERNAME and DEFAULT_PASSWORD environment variables to customise this.'
-		);
 	}
 }
